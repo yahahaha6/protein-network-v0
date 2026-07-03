@@ -97,7 +97,13 @@ export default async function ComplexIntraNetworkPage({
           </div>
         </section>
 
-        <NetworkGraph elements={network} />
+        <NetworkGraph
+  elements={network}
+  focusNodeId={complexId}
+  layoutName="cose"
+  showEdgeLabels={true}
+  enableNodeNavigation={true}
+/>
       </div>
     </main>
   );

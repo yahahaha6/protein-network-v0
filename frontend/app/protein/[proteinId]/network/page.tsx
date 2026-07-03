@@ -116,7 +116,13 @@ export default async function ProteinNeighborNetworkPage({
           </div>
         </section>
 
-        <NetworkGraph elements={network} />
+       <NetworkGraph
+  elements={network}
+  focusNodeId={proteinId}
+  layoutName="concentric"
+  showEdgeLabels={false}
+  enableNodeNavigation={true}
+/>
       </div>
     </main>
   );

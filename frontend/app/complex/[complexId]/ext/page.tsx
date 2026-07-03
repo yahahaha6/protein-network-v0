@@ -117,7 +117,13 @@ export default async function ComplexExternalNetworkPage({
           </div>
         </section>
 
-        <NetworkGraph elements={network} />
+        <NetworkGraph
+  elements={network}
+  focusNodeId={complexId}
+  layoutName="concentric"
+  showEdgeLabels={false}
+  enableNodeNavigation={true}
+/>
       </div>
     </main>
   );
