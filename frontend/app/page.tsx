@@ -2,77 +2,19 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
+import {
+  getSearchResultHref,
+  getSearchResultTitle,
+  getSearchResultType,
+  searchEntities,
+  type SearchResult,
+} from "@/lib/api";
 
-type SearchResult = {
-  id?: string;
-  label?: string;
-  name?: string;
-  type?: string;
-  uniprot_ac?: string;
-  complex_id?: string;
-  description?: string;
-};
-
-type SearchApiResponse =
-  | SearchResult[]
-  | {
-      query?: string;
-      type?: string;
-      count?: number;
-      results?: SearchResult[];
-      proteins?: SearchResult[];
-      complexes?: SearchResult[];
-    };
-
-function normalizeSearchResults(data: SearchApiResponse): SearchResult[] {
-  if (Array.isArray(data)) {
-    return data;
-  }
-
-  if (Array.isArray(data.results)) {
-    return data.results;
-  }
-
-  const merged: SearchResult[] = [];
-
-  if (Array.isArray(data.proteins)) {
-    merged.push(...data.proteins);
-  }
-
-  if (Array.isArray(data.complexes)) {
-    merged.push(...data.complexes);
-  }
-
-  return merged;
-}
-
-function getResultTitle(result: SearchResult) {
-  return result.label || result.name || result.id || "Unknown result";
-}
-
-function getResultType(result: SearchResult) {
-  return result.type || "unknown";
-}
-
-function getResultHref(result: SearchResult) {
-  const type = getResultType(result).toLowerCase();
-
-  if (type.includes("protein")) {
-    const proteinId = result.uniprot_ac || result.id;
-    return proteinId ? `/protein/${proteinId}` : "#";
-  }
-
-  if (type.includes("complex")) {
-    const rawComplexId = result.complex_id || result.id || "";
-    const complexId = rawComplexId.replace("CORUM:", "");
-    return complexId ? `/complex/${complexId}` : "#";
-  }
-
-  return "#";
-}
+type SearchType = "all" | "protein" | "complex";
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
+  const [searchType, setSearchType] = useState<SearchType>("all");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -93,20 +35,8 @@ export default function HomePage() {
     setResults([]);
 
     try {
-      const response = await fetch(
-        `http://localhost:8000/api/search?q=${encodeURIComponent(
-          trimmedQuery
-        )}&type=all`
-      );
-
-      if (!response.ok) {
-        throw new Error(`Search failed with status ${response.status}`);
-      }
-
-      const data: SearchApiResponse = await response.json();
-      const normalizedResults = normalizeSearchResults(data);
-
-      setResults(normalizedResults);
+      const searchResults = await searchEntities(trimmedQuery, searchType);
+      setResults(searchResults);
     } catch (err) {
       console.error(err);
       setError(
@@ -132,7 +62,7 @@ export default function HomePage() {
           <p className="max-w-2xl text-base leading-7 text-slate-300">
             Search for proteins such as EZH2 or TP53, or complexes such as
             PRC2/3 and CORUM:996. This V0 frontend connects to your FastAPI
-            backend and will visualize network data with Cytoscape.js.
+            backend and visualizes network data with Cytoscape.js.
           </p>
         </div>
 
@@ -145,7 +75,7 @@ export default function HomePage() {
               Search protein or complex
             </label>
 
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col gap-3 lg:flex-row">
               <input
                 id="search"
                 type="text"
@@ -154,6 +84,18 @@ export default function HomePage() {
                 placeholder="Try EZH2, TP53, PRC2, or 996"
                 className="min-h-12 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-4 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400"
               />
+
+              <select
+                value={searchType}
+                onChange={(event) =>
+                  setSearchType(event.target.value as SearchType)
+                }
+                className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-4 text-slate-100 outline-none transition focus:border-cyan-400"
+              >
+                <option value="all">All</option>
+                <option value="protein">Protein</option>
+                <option value="complex">Complex</option>
+              </select>
 
               <button
                 type="submit"
@@ -172,6 +114,12 @@ export default function HomePage() {
               </div>
             )}
 
+            {!error && loading && (
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">
+                Searching {searchType} results for "{query.trim()}"...
+              </div>
+            )}
+
             {!error && !loading && results.length === 0 && (
               <div className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
                 Search results will appear here.
@@ -181,13 +129,14 @@ export default function HomePage() {
             {!error && results.length > 0 && (
               <div className="space-y-3">
                 <p className="text-sm text-slate-400">
-                  Found {results.length} result{results.length > 1 ? "s" : ""}.
+                  Found {results.length} {searchType} result
+                  {results.length > 1 ? "s" : ""}.
                 </p>
 
                 {results.map((result, index) => {
-                  const title = getResultTitle(result);
-                  const type = getResultType(result);
-                  const href = getResultHref(result);
+                  const title = getSearchResultTitle(result);
+                  const type = getSearchResultType(result);
+                  const href = getSearchResultHref(result);
 
                   return (
                     <Link
@@ -202,7 +151,12 @@ export default function HomePage() {
                           </h2>
 
                           <p className="mt-1 text-sm text-slate-400">
-                            ID: {result.uniprot_ac || result.complex_id || result.id || "N/A"}
+                            ID:{" "}
+                            {result.uniprot_ac ||
+                              result.complex_id ||
+                              result.id ||
+                              result.key ||
+                              "N/A"}
                           </p>
 
                           {result.description && (
@@ -221,6 +175,23 @@ export default function HomePage() {
                 })}
               </div>
             )}
+          </div>
+        </div>
+
+        <div className="mt-8 grid gap-3 text-sm text-slate-400 sm:grid-cols-3">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <p className="font-semibold text-slate-200">Protein examples</p>
+            <p className="mt-2">EZH2, TP53</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <p className="font-semibold text-slate-200">Complex examples</p>
+            <p className="mt-2">996, PRC2, CORUM:996</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <p className="font-semibold text-slate-200">Network pages</p>
+            <p className="mt-2">Internal, external, neighbors</p>
           </div>
         </div>
       </section>
