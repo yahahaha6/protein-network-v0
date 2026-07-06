@@ -15,3 +15,8 @@ frontend/out/
 
 # System
 .DS_Store
+
+# Local/private data files
+data/
+data/*
+!data/README.md

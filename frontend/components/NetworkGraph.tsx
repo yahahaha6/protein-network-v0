@@ -1,9 +1,12 @@
 "use client";
 
 import cytoscape from "cytoscape";
-import type { Core, ElementDefinition, LayoutOptions } from "cytoscape";
+import type { Core, EdgeSingular, ElementDefinition, LayoutOptions, NodeSingular } from "cytoscape";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import DetailFields from "./DetailFields";
+
+type DetailRecord = Record<string, unknown>;
 
 type NetworkElements = {
   nodes: ElementDefinition[];
@@ -19,9 +22,18 @@ type NetworkGraphProps = {
   graphName?: string;
 };
 
-type SelectedNodeData = Record<string, unknown> | null;
+type SelectedElement =
+  | {
+      kind: "node";
+      data: DetailRecord;
+    }
+  | {
+      kind: "edge";
+      data: DetailRecord;
+    }
+  | null;
 
-function getNodeHref(data: Record<string, unknown>) {
+function getNodeHref(data: DetailRecord) {
   const rawId = String(data.id || "");
   const rawType = String(data.type || "").toLowerCase();
 
@@ -48,7 +60,7 @@ function addFocusToElements(
 
   return {
     nodes: elements.nodes.map((node) => {
-      const nodeData = { ...(node.data ?? {}) } as Record<string, unknown>;
+      const nodeData = { ...(node.data ?? {}) } as DetailRecord;
       const nodeId = String(nodeData.id || "");
       const nodeLabel = String(nodeData.label || "");
 
@@ -72,17 +84,6 @@ function addFocusToElements(
     edges: elements.edges,
   };
 }
-function formatNodeValue(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return "N/A";
-  }
-
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-
-  return String(value);
-}
 
 function makeSafeFileName(name: string) {
   return name
@@ -91,13 +92,138 @@ function makeSafeFileName(name: string) {
     .replace(/^_+|_+$/g, "");
 }
 
+function firstDefined(data: DetailRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = data[key];
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function buildEdgeDetailData(edgeData: DetailRecord): DetailRecord {
+  const preferredData: DetailRecord = {
+    source: firstDefined(edgeData, [
+      "source_protein",
+      "sourceProtein",
+      "source_name",
+      "sourceName",
+      "source",
+    ]),
+    target: firstDefined(edgeData, [
+      "target_protein",
+      "targetProtein",
+      "target_name",
+      "targetName",
+      "target",
+    ]),
+    type: firstDefined(edgeData, [
+      "relationship_type",
+      "relationshipType",
+      "edge_type",
+      "edgeType",
+      "type",
+    ]),
+    sources: firstDefined(edgeData, ["sources", "source_database", "sourceDatabase"]),
+    methods: firstDefined(edgeData, ["methods", "method"]),
+    publications: firstDefined(edgeData, ["publications", "publication", "pubmed_ids", "pubmedIds"]),
+    supporting_structures: firstDefined(edgeData, [
+      "supporting_structures",
+      "supportingStructures",
+      "structures",
+    ]),
+    gold_record_count: firstDefined(edgeData, [
+      "gold_record_count",
+      "goldRecordCount",
+      "record_count",
+      "recordCount",
+    ]),
+    ddi: firstDefined(edgeData, ["ddi", "domain_domain_interactions"]),
+    dmi: firstDefined(edgeData, ["dmi", "domain_motif_interactions"]),
+  };
+
+  const consumedKeys = new Set([
+    "source",
+    "source_protein",
+    "sourceProtein",
+    "source_name",
+    "sourceName",
+    "target",
+    "target_protein",
+    "targetProtein",
+    "target_name",
+    "targetName",
+    "type",
+    "relationship_type",
+    "relationshipType",
+    "edge_type",
+    "edgeType",
+    "sources",
+    "source_database",
+    "sourceDatabase",
+    "methods",
+    "method",
+    "publications",
+    "publication",
+    "pubmed_ids",
+    "pubmedIds",
+    "supporting_structures",
+    "supportingStructures",
+    "structures",
+    "gold_record_count",
+    "goldRecordCount",
+    "record_count",
+    "recordCount",
+    "ddi",
+    "domain_domain_interactions",
+    "dmi",
+    "domain_motif_interactions",
+  ]);
+
+  const extraData: DetailRecord = {};
+
+  for (const [key, value] of Object.entries(edgeData)) {
+    if (!consumedKeys.has(key)) {
+      extraData[key] = value;
+    }
+  }
+
+  return {
+    ...preferredData,
+    ...extraData,
+  };
+}
+
+function getEdgeTitle(edgeData: DetailRecord) {
+  const source = String(
+    firstDefined(edgeData, ["source_protein", "sourceProtein", "source"]) || "Unknown source"
+  );
+
+  const target = String(
+    firstDefined(edgeData, ["target_protein", "targetProtein", "target"]) || "Unknown target"
+  );
+
+  const type = String(
+    firstDefined(edgeData, ["relationship_type", "relationshipType", "type"]) || ""
+  );
+
+  if (type) {
+    return `${source} → ${target} (${type})`;
+  }
+
+  return `${source} → ${target}`;
+}
+
 const networkStyle = [
   {
-  selector: "node",
-  style: {
-    label: "data(label)",
-    width: 28,
-    height: 28,
+    selector: "node",
+    style: {
+      label: "data(label)",
+      width: 28,
+      height: 28,
       "background-color": "#06b6d4",
       "border-width": 2,
       "border-color": "#67e8f9",
@@ -113,8 +239,8 @@ const networkStyle = [
     },
   },
   {
-  selector: 'node[isFocus = "true"]',
-  style: {
+    selector: 'node[isFocus = "true"]',
+    style: {
       width: 42,
       height: 42,
       "background-color": "#facc15",
@@ -151,6 +277,16 @@ const networkStyle = [
       opacity: 0.75,
       "curve-style": "bezier",
       "target-arrow-shape": "none",
+      "overlay-padding": 8,
+      "overlay-opacity": 0,
+    },
+  },
+  {
+    selector: "edge:selected",
+    style: {
+      width: 4,
+      "line-color": "#f8fafc",
+      opacity: 1,
     },
   },
   {
@@ -166,21 +302,21 @@ const networkStyle = [
     },
   },
   {
-  selector: 'edge[type = "INTRA_PAIR_CONFIRMED"]',
-  style: {
-    width: 2.2,
-    "line-color": "#22c55e",
-    opacity: 0.9,
+    selector: 'edge[type = "INTRA_PAIR_CONFIRMED"]',
+    style: {
+      width: 2.2,
+      "line-color": "#22c55e",
+      opacity: 0.9,
+    },
   },
-},
-{
-  selector: 'edge[type = "intra_pair_confirmed"]',
-  style: {
-    width: 2.2,
-    "line-color": "#22c55e",
-    opacity: 0.9,
+  {
+    selector: 'edge[type = "intra_pair_confirmed"]',
+    style: {
+      width: 2.2,
+      "line-color": "#22c55e",
+      opacity: 0.9,
+    },
   },
-},
   {
     selector: 'edge[type = "DIRECT_PPI"]',
     style: {
@@ -198,21 +334,21 @@ const networkStyle = [
     },
   },
   {
-  selector: 'edge[type = "CO_COMPLEX_ONLY"]',
-  style: {
-    "line-style": "dashed",
-    "line-color": "#f97316",
-    opacity: 0.85,
+    selector: 'edge[type = "CO_COMPLEX_ONLY"]',
+    style: {
+      "line-style": "dashed",
+      "line-color": "#f97316",
+      opacity: 0.85,
+    },
   },
-},
-{
-  selector: 'edge[type = "co-complex-only"]',
-  style: {
-    "line-style": "dashed",
-    "line-color": "#f97316",
-    opacity: 0.85,
+  {
+    selector: 'edge[type = "co-complex-only"]',
+    style: {
+      "line-style": "dashed",
+      "line-color": "#f97316",
+      opacity: 0.85,
+    },
   },
-},
   {
     selector: 'edge[type = "co_complex_only"]',
     style: {
@@ -230,7 +366,7 @@ function getLayoutOptions(layoutName: NetworkGraphProps["layoutName"]) {
       padding: 80,
       animate: false,
       minNodeSpacing: 70,
-      concentric: function (node: cytoscape.NodeSingular) {
+      concentric: function (node: NodeSingular) {
         return node.data("isFocus") ? 10 : 1;
       },
       levelWidth: function () {
@@ -271,12 +407,17 @@ export default function NetworkGraph({
   const cyRef = useRef<Core | null>(null);
   const router = useRouter();
 
-  const [selectedNodeData, setSelectedNodeData] =
-    useState<SelectedNodeData>(null);
+  const [selectedElement, setSelectedElement] = useState<SelectedElement>(null);
 
-  const selectedNodeHref = selectedNodeData
-    ? getNodeHref(selectedNodeData)
-    : null;
+  const selectedNodeData =
+    selectedElement?.kind === "node" ? selectedElement.data : null;
+
+  const selectedEdgeData =
+    selectedElement?.kind === "edge"
+      ? buildEdgeDetailData(selectedElement.data)
+      : null;
+
+  const selectedNodeHref = selectedNodeData ? getNodeHref(selectedNodeData) : null;
 
   function fitView() {
     cyRef.current?.fit(undefined, 80);
@@ -327,7 +468,7 @@ export default function NetworkGraph({
       return;
     }
 
-    setSelectedNodeData(null);
+    setSelectedElement(null);
 
     const focusedElements = addFocusToElements(elements, focusNodeId);
 
@@ -336,6 +477,8 @@ export default function NetworkGraph({
       elements: focusedElements as cytoscape.ElementsDefinition,
       style: networkStyle,
       layout: getLayoutOptions(layoutName),
+      boxSelectionEnabled: false,
+      autounselectify: false,
     });
 
     cyRef.current = cy;
@@ -344,26 +487,44 @@ export default function NetworkGraph({
       cy.edges().addClass("show-label");
     }
 
-    cy.on("mouseover", "node", () => {
+    function setPointerCursor() {
       if (containerRef.current) {
         containerRef.current.style.cursor = "pointer";
       }
-    });
+    }
 
-    cy.on("mouseout", "node", () => {
+    function setDefaultCursor() {
       if (containerRef.current) {
         containerRef.current.style.cursor = "default";
       }
-    });
+    }
+
+    cy.on("mouseover", "node", setPointerCursor);
+    cy.on("mouseout", "node", setDefaultCursor);
+
+    cy.on("mouseover", "edge", setPointerCursor);
+    cy.on("mouseout", "edge", setDefaultCursor);
 
     cy.on("tap", "node", (event) => {
-      const node = event.target;
-      setSelectedNodeData(node.data());
+      const node = event.target as NodeSingular;
+      setSelectedElement({
+        kind: "node",
+        data: { ...node.data() },
+      });
+    });
+
+    cy.on("tap", "edge", (event) => {
+      const edge = event.target as EdgeSingular;
+      setSelectedElement({
+        kind: "edge",
+        data: { ...edge.data() },
+      });
     });
 
     cy.on("tap", (event) => {
       if (event.target === cy) {
-        setSelectedNodeData(null);
+        cy.elements().unselect();
+        setSelectedElement(null);
       }
     });
 
@@ -371,120 +532,125 @@ export default function NetworkGraph({
       cy.destroy();
       cyRef.current = null;
     };
-  }, [
-    elements,
-    focusNodeId,
-    layoutName,
-    showEdgeLabels,
-    enableNodeNavigation,
-    router,
-  ]);
+  }, [elements, focusNodeId, layoutName, showEdgeLabels]);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
-      <div className="flex flex-col gap-3 border-b border-slate-800 bg-slate-900/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold text-slate-100">Network Viewer</p>
-          <p className="mt-1 text-xs text-slate-500">
-            Drag nodes, scroll to zoom, click a node to inspect it.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={fitView}
-            className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-cyan-400 hover:text-cyan-300"
-          >
-            Fit View
-          </button>
-
-          <button
-            type="button"
-            onClick={resetLayout}
-            className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-cyan-400 hover:text-cyan-300"
-          >
-            Reset Layout
-          </button>
-
-          <button
-            type="button"
-            onClick={downloadPng}
-            className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-cyan-400"
-          >
-            Download PNG
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div ref={containerRef} className="h-[720px] w-full" />
-
-        <aside className="border-t border-slate-800 bg-slate-900/70 p-4 lg:border-l lg:border-t-0">
-          <div className="mb-4">
-            <p className="text-sm font-semibold text-slate-100">Node Detail</p>
-            <p className="mt-1 text-xs text-slate-500">
-              Click a node in the graph to view its data.
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <section className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">
+              Network Viewer
+            </h2>
+            <p className="text-sm text-slate-400">
+              Drag nodes, scroll to zoom, click a node or edge to inspect it.
             </p>
           </div>
 
-          {!selectedNodeData && (
-            <div className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-500">
-              No node selected.
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={fitView}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+            >
+              Fit View
+            </button>
 
-          {selectedNodeData && (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-cyan-800 bg-cyan-950/30 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-                  Selected Node
-                </p>
+            <button
+              type="button"
+              onClick={resetLayout}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+            >
+              Reset Layout
+            </button>
 
-                <h3 className="mt-2 break-words text-lg font-bold text-slate-100">
-                  {String(
-                    selectedNodeData.label ||
-                      selectedNodeData.name ||
-                      selectedNodeData.id ||
-                      "Unknown"
-                  )}
-                </h3>
+            <button
+              type="button"
+              onClick={downloadPng}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+            >
+              Download PNG
+            </button>
+          </div>
+        </div>
 
-                <p className="mt-1 break-words text-sm text-slate-400">
-                  {String(selectedNodeData.id || "N/A")}
-                </p>
+        <div
+          ref={containerRef}
+          className="h-[640px] w-full rounded-xl border border-slate-800 bg-slate-900"
+        />
+      </section>
 
-                {selectedNodeHref && enableNodeNavigation && (
-                  <button
-                    type="button"
-                    onClick={openSelectedNode}
-                    className="mt-4 w-full rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
-                  >
-                    Open Detail Page
-                  </button>
+      <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl">
+        <h2 className="text-lg font-semibold text-slate-100">
+          {selectedElement?.kind === "edge" ? "Edge Detail" : "Node Detail"}
+        </h2>
+
+        <p className="mt-1 text-sm text-slate-400">
+          Click a node to view node metadata. Click an edge to view relationship
+          evidence.
+        </p>
+
+        {!selectedElement && (
+          <div className="mt-4 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
+            No node or edge selected.
+          </div>
+        )}
+
+        {selectedElement?.kind === "node" && selectedNodeData && (
+          <div className="mt-4 space-y-4">
+            <div className="rounded-xl border border-cyan-900/70 bg-cyan-950/20 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+                Selected Node
+              </p>
+
+              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">
+                {String(
+                  selectedNodeData.label ||
+                    selectedNodeData.name ||
+                    selectedNodeData.id ||
+                    "Unknown"
                 )}
-              </div>
+              </h3>
 
-              <div className="space-y-2">
-                {Object.entries(selectedNodeData).map(([key, value]) => (
-                  <div
-                    key={key}
-                    className="rounded-xl border border-slate-800 bg-slate-950/70 p-3"
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {key}
-                    </p>
+              <p className="mt-1 break-words text-xs text-slate-400">
+                {String(selectedNodeData.id || "N/A")}
+              </p>
 
-                    <p className="mt-1 break-words text-sm leading-6 text-slate-200">
-                      {formatNodeValue(value)}
-                    </p>
-                  </div>
-                ))}
-              </div>
+              {selectedNodeHref && enableNodeNavigation && (
+                <button
+                  type="button"
+                  onClick={openSelectedNode}
+                  className="mt-3 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+                >
+                  Open Detail Page
+                </button>
+              )}
             </div>
-          )}
-        </aside>
-      </div>
+
+            <DetailFields title="Node Fields" data={selectedNodeData} />
+          </div>
+        )}
+
+        {selectedElement?.kind === "edge" && selectedEdgeData && (
+          <div className="mt-4 space-y-4">
+            <div className="rounded-xl border border-amber-900/70 bg-amber-950/20 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">
+                Selected Edge
+              </p>
+
+              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">
+                {getEdgeTitle(selectedElement.data)}
+              </h3>
+
+              <p className="mt-1 text-xs text-slate-400">
+                Relationship evidence only. No navigation for edges yet.
+              </p>
+            </div>
+
+            <DetailFields title="Edge Fields" data={selectedEdgeData} />
+          </div>
+        )}
+      </aside>
     </div>
   );
 }
