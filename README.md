@@ -1,5 +1,3 @@
-
-
 # Protein Network Explorer V1
 
 Protein Network Explorer is a local web application for exploring protein complexes, protein-protein interaction networks, and evidence-backed relationship data.
@@ -89,24 +87,29 @@ protein-network-v0/
 ├── data/
 │   └── local private data, ignored by Git
 └── docs/
-Data Privacy
+```
+
+## Data Privacy
 
 The real biological graph data is intentionally not included in this repository.
 
-The data/ directory is ignored by Git because it may contain large or private research files, including GraphML, JSON, and TSV data files.
+The `data/` directory is ignored by Git because it may contain large or private research files, including GraphML, JSON, and TSV data files.
 
 Before committing, always check:
 
+```bash
 git ls-files data
+```
 
 This command should return no output.
 
-Local Data Layout
+## Local Data Layout
 
-The backend expects local data files under data/.
+The backend expects local data files under `data/`.
 
 Current local layout:
 
+```text
 data/
 ├── complex_ext_ppi_graph/
 │   ├── complex_ext_ppi_graph.graphml
@@ -126,101 +129,153 @@ data/
 └── ppi_unit_graph/
     ├── ppi_edges.tsv
     └── ppi_nodes.tsv
-Run Backend
+```
+
+## Run Backend
+
+```bash
 cd backend
 source .venv/bin/activate
 uvicorn app.main:app --reload --port 8000
+```
 
 Backend URL:
 
+```text
 http://localhost:8000
+```
 
 API docs:
 
+```text
 http://localhost:8000/docs
-Run Frontend
+```
+
+## Run Frontend
+
+```bash
 cd frontend
 npm install
 npm run dev
+```
 
 Frontend URL:
 
+```text
 http://localhost:3000
-Main Pages
+```
+
+## Main Pages
+
+```text
 /
+```
 
 Home page with search and module entry points.
 
+```text
 /protein/Q15910
+```
 
 Protein detail page.
 
+```text
 /protein/Q15910/network
+```
 
 Protein neighbor network page.
 
+```text
 /complex/996
+```
 
 Complex detail page.
 
+```text
 /complex/996/intra
+```
 
 Intra-complex network page.
 
+```text
 /complex/996/ext
+```
 
 External complex-protein interaction network page.
 
+```text
 /global-ppi
+```
 
 Global PPI Explorer entry page.
 
+```text
 /global-ppi/protein/Q15910/network
+```
 
 Protein-centered global PPI neighborhood page.
 
-Backend API
-Health
+## Backend API
+
+### Health
+
+```text
 GET /api/health
-Search
+```
+
+### Search
+
+```text
 GET /api/search?q={keyword}&type={protein|complex|all}
-Protein
+```
+
+### Protein
+
+```text
 GET /api/protein/{uniprot_ac}
 GET /api/protein/{uniprot_ac}/neighbors
-Complex
+```
+
+### Complex
+
+```text
 GET /api/complex/{complex_id}
 GET /api/complex/{complex_id}/intra
 GET /api/complex/{complex_id}/ext
-Global PPI
+```
+
+### Global PPI
+
+```text
 GET /api/global-ppi/info
 GET /api/global-ppi/protein/{uniprot_ac}
 GET /api/global-ppi/protein/{uniprot_ac}/neighbors?limit=20
 GET /api/global-ppi/edge?source={source}&target={target}
-V1 Status
+```
+
+## V1 Status
 
 V1 includes:
 
-Full-stack FastAPI + Next.js workflow
-Protein and complex detail pages
-Cytoscape.js network visualization
-Node detail inspection
-Edge evidence inspection
-Global PPI neighborhood exploration
-PNG graph export
-Raw JSON graph export
-Local-only private data workflow
-Future Work
+- Full-stack FastAPI + Next.js workflow
+- Protein and complex detail pages
+- Cytoscape.js network visualization
+- Node detail inspection
+- Edge evidence inspection
+- Global PPI neighborhood exploration
+- PNG graph export
+- Raw JSON graph export
+- Local-only private data workflow
+
+## Future Work
 
 Potential V1.1 / V2 improvements:
 
-Search global PPI by gene symbol, not only UniProt ID
-Add PubMed links for publication fields
-Add source database badges
-Add edge filtering by source database or evidence type
-Add shortest path search between proteins
-Add second-hop neighborhood expansion
-Add Neo4j-backed graph queries
-Add deployment configuration
-
----
-
+- Search global PPI by gene symbol, not only UniProt ID
+- Add PubMed links for publication fields
+- Add source database badges
+- Add edge filtering by source database or evidence type
+- Add shortest path search between proteins
+- Add second-hop neighborhood expansion
+- Add Neo4j-backed graph queries
+- Add deployment configuration
