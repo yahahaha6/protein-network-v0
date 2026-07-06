@@ -1,5 +1,6 @@
 import Link from "next/link";
 import DetailFields from "@/components/DetailFields";
+import ExpressionProfileCard from "@/components/ExpressionProfileCard";
 import { getProteinDetail, type DetailRecord } from "@/lib/api";
 
 type ProteinPageProps = {
@@ -89,7 +90,9 @@ export default async function ProteinDetailPage({ params }: ProteinPageProps) {
           </div>
         </section>
 
-        <DetailFields title="Protein detail fields" data={protein} />
+        <ExpressionProfileCard data={protein} />
+
+<DetailFields title="Protein detail fields" data={protein} />
       </div>
     </main>
   );

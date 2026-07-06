@@ -150,8 +150,18 @@ function buildEdgeDetailData(edgeData: DetailRecord): DetailRecord {
       "record_count",
       "recordCount",
     ]),
-    ddi: firstDefined(edgeData, ["ddi", "domain_domain_interactions"]),
-    dmi: firstDefined(edgeData, ["dmi", "domain_motif_interactions"]),
+        ddi: firstDefined(edgeData, [
+      "ddi",
+      "DDI",
+      "domain_domain_interactions",
+      "domainDomainInteractions",
+    ]),
+    dmi: firstDefined(edgeData, [
+      "dmi",
+      "DMI",
+      "domain_motif_interactions",
+      "domainMotifInteractions",
+    ]),
   };
 
   const consumedKeys = new Set([
@@ -186,10 +196,14 @@ function buildEdgeDetailData(edgeData: DetailRecord): DetailRecord {
     "goldRecordCount",
     "record_count",
     "recordCount",
-    "ddi",
+        "ddi",
+    "DDI",
     "domain_domain_interactions",
+    "domainDomainInteractions",
     "dmi",
+    "DMI",
     "domain_motif_interactions",
+    "domainMotifInteractions",
   ]);
 
   const extraData: DetailRecord = {};
@@ -309,6 +323,74 @@ function formatSummaryValue(value: unknown) {
 
   return String(value);
 }
+function hasEvidenceValue(value: unknown): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasEvidenceValue(item));
+  }
+
+  if (typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>).length > 0;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+
+  return ![
+    "",
+    "0",
+    "false",
+    "no",
+    "none",
+    "null",
+    "undefined",
+    "n/a",
+    "na",
+    "nan",
+    "[]",
+    "{}",
+  ].includes(normalized);
+}
+
+function edgeHasAnyEvidenceField(data: DetailRecord, keys: string[]) {
+  return keys.some((key) => hasEvidenceValue(data[key]));
+}
+
+function applyEdgeEvidenceClasses(cy: Core) {
+  cy.edges().forEach((edge) => {
+    const edgeData = edge.data() as DetailRecord;
+
+    const hasDdi = edgeHasAnyEvidenceField(edgeData, [
+      "ddi",
+      "DDI",
+      "domain_domain_interactions",
+      "domainDomainInteractions",
+    ]);
+
+    const hasDmi = edgeHasAnyEvidenceField(edgeData, [
+      "dmi",
+      "DMI",
+      "domain_motif_interactions",
+      "domainMotifInteractions",
+    ]);
+
+    edge.removeClass("has-ddi has-dmi has-ddi-dmi");
+
+    if (hasDdi) {
+      edge.addClass("has-ddi");
+    }
+
+    if (hasDmi) {
+      edge.addClass("has-dmi");
+    }
+
+    if (hasDdi && hasDmi) {
+      edge.addClass("has-ddi-dmi");
+    }
+  });
+}
 
 const networkStyle = [
   {
@@ -329,6 +411,30 @@ const networkStyle = [
       "text-outline-width": 2,
       "text-outline-color": "#020617",
       "overlay-opacity": 0,
+    },
+  },
+    {
+    selector:
+      'node[protein_category = "TF"], node[proteinCategory = "TF"], node[category = "TF"], node[protein_category = "tf"], node[proteinCategory = "tf"], node[category = "tf"]',
+    style: {
+      "background-color": "#22c55e",
+      "border-color": "#86efac",
+    },
+  },
+  {
+    selector:
+      'node[protein_category = "EF"], node[proteinCategory = "EF"], node[category = "EF"], node[protein_category = "ef"], node[proteinCategory = "ef"], node[category = "ef"]',
+    style: {
+      "background-color": "#38bdf8",
+      "border-color": "#bae6fd",
+    },
+  },
+  {
+    selector:
+      'node[protein_category = "TF_and_EF"], node[proteinCategory = "TF_and_EF"], node[category = "TF_and_EF"], node[protein_category = "TF_AND_EF"], node[proteinCategory = "TF_AND_EF"], node[category = "TF_AND_EF"], node[protein_category = "tf_and_ef"], node[proteinCategory = "tf_and_ef"], node[category = "tf_and_ef"], node[protein_category = "TF/EF"], node[proteinCategory = "TF/EF"], node[category = "TF/EF"]',
+    style: {
+      "background-color": "#f97316",
+      "border-color": "#fed7aa",
     },
   },
   {
@@ -442,14 +548,47 @@ const networkStyle = [
       opacity: 0.85,
     },
   },
-  {
+    {
     selector: 'edge[type = "co_complex_only"]',
     style: {
       "line-style": "dashed",
       "line-color": "#f97316",
     },
   },
+  {
+    selector: "edge.has-ddi",
+    style: {
+      width: 3,
+      "line-color": "#ec4899",
+      opacity: 0.95,
+    },
+  },
+  {
+    selector: "edge.has-dmi",
+    style: {
+      width: 3,
+      "line-color": "#8b5cf6",
+      opacity: 0.95,
+    },
+  },
+  {
+    selector: "edge.has-ddi-dmi",
+    style: {
+      width: 4,
+      "line-color": "#facc15",
+      opacity: 1,
+    },
+  },
+  {
+    selector: "edge:selected",
+    style: {
+      width: 5,
+      "line-color": "#f8fafc",
+      opacity: 1,
+    },
+  },
 ] as cytoscape.StylesheetJson;
+
 
 function getLayoutOptions(layoutName: NetworkGraphProps["layoutName"]) {
   if (layoutName === "concentric") {
@@ -616,7 +755,9 @@ export default function NetworkGraph({
       autounselectify: false,
     });
 
-    cyRef.current = cy;
+        cyRef.current = cy;
+
+    applyEdgeEvidenceClasses(cy);
 
     if (showEdgeLabels) {
       cy.edges().addClass("show-label");
@@ -726,10 +867,71 @@ export default function NetworkGraph({
 </div>
         </div>
 
-        <div
+                <div
   ref={containerRef}
   className="h-[760px] w-full rounded-xl border border-slate-800 bg-slate-900"
 />
+
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
+          <span className="font-semibold uppercase tracking-wide text-slate-500">
+            Node legend
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full border border-green-200 bg-green-500" />
+            TF
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full border border-sky-200 bg-sky-400" />
+            EF
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full border border-orange-200 bg-orange-500" />
+            TF_and_EF
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full border border-yellow-200 bg-yellow-400" />
+            Focus protein
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full border border-purple-200 bg-purple-500" />
+            Complex
+          </span>
+        </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
+          <span className="font-semibold uppercase tracking-wide text-slate-500">
+            Edge legend
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-1 w-8 rounded-full bg-pink-500" />
+            DDI evidence
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-1 w-8 rounded-full bg-violet-500" />
+            DMI evidence
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-1.5 w-8 rounded-full bg-yellow-400" />
+            DDI + DMI
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-1 w-8 rounded-full bg-sky-400" />
+            Direct PPI
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-1 w-8 border-t border-dashed border-orange-400" />
+            Co-complex only
+          </span>
+        </div>
       </section>
 
       <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl">
