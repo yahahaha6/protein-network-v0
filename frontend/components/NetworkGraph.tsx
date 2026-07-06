@@ -197,17 +197,76 @@ function buildEdgeDetailData(edgeData: DetailRecord): DetailRecord {
   };
 }
 
-function getEdgeTitle(edgeData: DetailRecord) {
-  const source = String(
-    firstDefined(edgeData, ["source_protein", "sourceProtein", "source"]) || "Unknown source"
-  );
+function cleanNodeId(value: unknown) {
+  return String(value || "").replace("UniProt:", "").replace("CORUM:", "");
+}
 
-  const target = String(
-    firstDefined(edgeData, ["target_protein", "targetProtein", "target"]) || "Unknown target"
-  );
+function getEndpointDisplay(edgeData: DetailRecord, side: "source" | "target") {
+  const label =
+    side === "source"
+      ? firstDefined(edgeData, [
+          "source_node_label",
+          "sourceLabel",
+          "source_label",
+          "source_name",
+          "sourceName",
+          "source_protein",
+          "sourceProtein",
+        ])
+      : firstDefined(edgeData, [
+          "target_node_label",
+          "targetLabel",
+          "target_label",
+          "target_name",
+          "targetName",
+          "target_protein",
+          "targetProtein",
+        ]);
+
+  const id =
+    side === "source"
+      ? firstDefined(edgeData, [
+          "source_node_id",
+          "source",
+          "source_id",
+          "sourceId",
+          "source_uniprot",
+          "sourceUniProt",
+        ])
+      : firstDefined(edgeData, [
+          "target_node_id",
+          "target",
+          "target_id",
+          "targetId",
+          "target_uniprot",
+          "targetUniProt",
+        ]);
+
+  const cleanedLabel = String(label || "").trim();
+  const cleanedId = cleanNodeId(id).trim();
+
+  if (cleanedLabel && cleanedId && cleanedLabel !== cleanedId) {
+    return `${cleanedLabel} / ${cleanedId}`;
+  }
+
+  if (cleanedLabel) {
+    return cleanedLabel;
+  }
+
+  if (cleanedId) {
+    return cleanedId;
+  }
+
+  return side === "source" ? "Unknown source" : "Unknown target";
+}
+
+function getEdgeTitle(edgeData: DetailRecord) {
+  const source = getEndpointDisplay(edgeData, "source");
+  const target = getEndpointDisplay(edgeData, "target");
 
   const type = String(
-    firstDefined(edgeData, ["relationship_type", "relationshipType", "type"]) || ""
+    firstDefined(edgeData, ["relationship_type", "relationshipType", "type"]) ||
+      ""
   );
 
   if (type) {
@@ -443,21 +502,21 @@ export default function NetworkGraph({
       : null;
 
   const selectedNodeHref = selectedNodeData ? getNodeHref(selectedNodeData) : null;
-  const selectedEdgeSummary = selectedEdgeData
-  ? {
-      source: formatSummaryValue(selectedEdgeData.source),
-      target: formatSummaryValue(selectedEdgeData.target),
-      type: formatSummaryValue(selectedEdgeData.type),
-      sources: formatSummaryValue(selectedEdgeData.sources),
-      methods: formatSummaryValue(selectedEdgeData.methods),
-      publications: formatSummaryValue(selectedEdgeData.publications),
-      structures: formatSummaryValue(selectedEdgeData.supporting_structures),
-      goldRecordCount: formatSummaryValue(selectedEdgeData.gold_record_count),
-      ddi: formatSummaryValue(selectedEdgeData.ddi),
-      dmi: formatSummaryValue(selectedEdgeData.dmi),
-    }
-  : null;
-
+  const selectedEdgeSummary =
+  selectedElement?.kind === "edge" && selectedEdgeData
+    ? {
+        source: getEndpointDisplay(selectedElement.data, "source"),
+        target: getEndpointDisplay(selectedElement.data, "target"),
+        type: formatSummaryValue(selectedEdgeData.type),
+        sources: formatSummaryValue(selectedEdgeData.sources),
+        methods: formatSummaryValue(selectedEdgeData.methods),
+        publications: formatSummaryValue(selectedEdgeData.publications),
+        structures: formatSummaryValue(selectedEdgeData.supporting_structures),
+        goldRecordCount: formatSummaryValue(selectedEdgeData.gold_record_count),
+        ddi: formatSummaryValue(selectedEdgeData.ddi),
+        dmi: formatSummaryValue(selectedEdgeData.dmi),
+      }
+    : null;
   function fitView() {
   cyRef.current?.fit(undefined, 120);
 }
@@ -553,12 +612,21 @@ export default function NetworkGraph({
     });
 
     cy.on("tap", "edge", (event) => {
-      const edge = event.target as EdgeSingular;
-      setSelectedElement({
-        kind: "edge",
-        data: { ...edge.data() },
-      });
-    });
+  const edge = event.target as EdgeSingular;
+  const sourceNode = edge.source();
+  const targetNode = edge.target();
+
+  setSelectedElement({
+    kind: "edge",
+    data: {
+      ...edge.data(),
+      source_node_id: sourceNode.data("id"),
+      source_node_label: sourceNode.data("label"),
+      target_node_id: targetNode.data("id"),
+      target_node_label: targetNode.data("label"),
+    },
+  });
+});
 
     cy.on("tap", (event) => {
       if (event.target === cy) {
