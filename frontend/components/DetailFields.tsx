@@ -15,13 +15,111 @@ function formatKey(key: string) {
     .replaceAll("-", " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
+function normalizeToken(value: string) {
+  return value.trim().replace(/^["'([{]+|["')\]}.,;:]+$/g, "");
+}
+
+function isLikelyUniprotId(value: string) {
+  return /^[OPQ][0-9][A-Z0-9]{3}[0-9]$/.test(value) || /^[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]$/.test(value);
+}
+
+function isLikelyPmid(value: string) {
+  return /^[1-9][0-9]{5,8}$/.test(value);
+}
+
+function isLikelyPdbId(value: string) {
+  return /^[0-9][A-Za-z0-9]{3}$/.test(value);
+}
+
+function externalLinkForToken(token: string) {
+  const cleaned = normalizeToken(token);
+
+  if (!cleaned) {
+    return null;
+  }
+
+  if (cleaned.toLowerCase().startsWith("pmid:")) {
+    const pmid = cleaned.slice(5);
+    return {
+      label: cleaned,
+      href: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
+      type: "PubMed",
+    };
+  }
+
+  if (isLikelyUniprotId(cleaned)) {
+    return {
+      label: cleaned,
+      href: `https://www.uniprot.org/uniprotkb/${cleaned}/entry`,
+      type: "UniProt",
+    };
+  }
+
+  if (isLikelyPdbId(cleaned)) {
+    return {
+      label: cleaned.toUpperCase(),
+      href: `https://www.rcsb.org/structure/${cleaned.toUpperCase()}`,
+      type: "RCSB PDB",
+    };
+  }
+
+  if (isLikelyPmid(cleaned)) {
+    return {
+      label: cleaned,
+      href: `https://pubmed.ncbi.nlm.nih.gov/${cleaned}/`,
+      type: "PubMed",
+    };
+  }
+
+  return null;
+}
+
+function renderExternalToken(token: string): ReactNode {
+  const link = externalLinkForToken(token);
+
+  if (!link) {
+    return token;
+  }
+
+  return (
+    <a
+      href={link.href}
+      target="_blank"
+      rel="noreferrer"
+      className="font-semibold text-cyan-300 underline decoration-cyan-700 underline-offset-2 hover:text-cyan-100"
+      title={`Open ${link.type}`}
+    >
+      {link.label}
+    </a>
+  );
+}
+
+function renderLinkedText(value: string): ReactNode {
+  const parts = value.split(/(\s+|[,;|])/g);
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (/^(\s+|[,;|])$/.test(part)) {
+          return part;
+        }
+
+        return <span key={`${part}-${index}`}>{renderExternalToken(part)}</span>;
+      })}
+    </>
+  );
+}
 
 function renderValue(value: unknown): ReactNode {
   if (value === null || value === undefined || value === "") {
     return <span className="text-slate-500">N/A</span>;
   }
 
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === "string") {
+    return <span>{renderLinkedText(value)}</span>;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
     return <span>{String(value)}</span>;
   }
 
