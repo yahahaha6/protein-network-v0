@@ -115,10 +115,10 @@ export default function HomePage() {
             )}
 
             {!error && loading && (
-              <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">
-                Searching {searchType} results for "{query.trim()}"...
-              </div>
-            )}
+  <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">
+    Searching {searchType} results for {query.trim()}...
+  </div>
+)}
 
             {!error && !loading && results.length === 0 && (
               <div className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
