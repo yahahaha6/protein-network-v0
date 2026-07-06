@@ -216,6 +216,31 @@ function getEdgeTitle(edgeData: DetailRecord) {
 
   return `${source} → ${target}`;
 }
+function formatSummaryValue(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return "N/A";
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "N/A";
+    }
+
+    return value
+      .map((item) =>
+        typeof item === "object" && item !== null
+          ? JSON.stringify(item)
+          : String(item)
+      )
+      .join(", ");
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
 
 const networkStyle = [
   {
@@ -418,6 +443,20 @@ export default function NetworkGraph({
       : null;
 
   const selectedNodeHref = selectedNodeData ? getNodeHref(selectedNodeData) : null;
+  const selectedEdgeSummary = selectedEdgeData
+  ? {
+      source: formatSummaryValue(selectedEdgeData.source),
+      target: formatSummaryValue(selectedEdgeData.target),
+      type: formatSummaryValue(selectedEdgeData.type),
+      sources: formatSummaryValue(selectedEdgeData.sources),
+      methods: formatSummaryValue(selectedEdgeData.methods),
+      publications: formatSummaryValue(selectedEdgeData.publications),
+      structures: formatSummaryValue(selectedEdgeData.supporting_structures),
+      goldRecordCount: formatSummaryValue(selectedEdgeData.gold_record_count),
+      ddi: formatSummaryValue(selectedEdgeData.ddi),
+      dmi: formatSummaryValue(selectedEdgeData.dmi),
+    }
+  : null;
 
   function fitView() {
   cyRef.current?.fit(undefined, 120);
@@ -631,25 +670,107 @@ export default function NetworkGraph({
           </div>
         )}
 
-        {selectedElement?.kind === "edge" && selectedEdgeData && (
-          <div className="mt-4 space-y-4">
-            <div className="rounded-xl border border-amber-900/70 bg-amber-950/20 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">
-                Selected Edge
-              </p>
+        {selectedElement?.kind === "edge" && selectedEdgeData && selectedEdgeSummary && (
+  <div className="mt-4 space-y-4">
+    <div className="rounded-xl border border-amber-900/70 bg-amber-950/20 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">
+        Selected Edge Evidence
+      </p>
 
-              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">
-                {getEdgeTitle(selectedElement.data)}
-              </h3>
+      <h3 className="mt-1 break-words text-base font-semibold text-slate-100">
+        {getEdgeTitle(selectedElement.data)}
+      </h3>
 
-              <p className="mt-1 text-xs text-slate-400">
-                Relationship evidence only. No navigation for edges yet.
-              </p>
-            </div>
+      <div className="mt-4 grid gap-3 text-sm">
+        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            Source
+          </p>
+          <p className="mt-1 break-words font-medium text-slate-200">
+            {selectedEdgeSummary.source}
+          </p>
+        </div>
 
-            <DetailFields title="Edge Fields" data={selectedEdgeData} />
-          </div>
-        )}
+        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            Target
+          </p>
+          <p className="mt-1 break-words font-medium text-slate-200">
+            {selectedEdgeSummary.target}
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            Relationship Type
+          </p>
+          <p className="mt-1 break-words font-medium text-slate-200">
+            {selectedEdgeSummary.type}
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+        Evidence Summary
+      </p>
+
+      <dl className="mt-3 space-y-3 text-sm">
+        <div>
+          <dt className="text-slate-500">Source databases</dt>
+          <dd className="mt-1 break-words text-slate-200">
+            {selectedEdgeSummary.sources}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-slate-500">Experimental methods</dt>
+          <dd className="mt-1 break-words text-slate-200">
+            {selectedEdgeSummary.methods}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-slate-500">Publications</dt>
+          <dd className="mt-1 break-words text-slate-200">
+            {selectedEdgeSummary.publications}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-slate-500">Supporting structures</dt>
+          <dd className="mt-1 break-words text-slate-200">
+            {selectedEdgeSummary.structures}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-slate-500">Gold record count</dt>
+          <dd className="mt-1 break-words text-slate-200">
+            {selectedEdgeSummary.goldRecordCount}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-slate-500">DDI</dt>
+          <dd className="mt-1 break-words text-slate-200">
+            {selectedEdgeSummary.ddi}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-slate-500">DMI</dt>
+          <dd className="mt-1 break-words text-slate-200">
+            {selectedEdgeSummary.dmi}
+          </dd>
+        </div>
+      </dl>
+    </div>
+
+    <DetailFields title="Full Edge Fields" data={selectedEdgeData} />
+  </div>
+)}
       </aside>
     </div>
   );
