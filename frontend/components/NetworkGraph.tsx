@@ -3,8 +3,9 @@
 import cytoscape from "cytoscape";
 import type { Core, EdgeSingular, ElementDefinition, LayoutOptions, NodeSingular } from "cytoscape";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DetailFields from "./DetailFields";
+import NetworkAttributeTable from "./NetworkAttributeTable";
 
 type DetailRecord = Record<string, unknown>;
 
@@ -357,7 +358,131 @@ function hasEvidenceValue(value: unknown): boolean {
 function edgeHasAnyEvidenceField(data: DetailRecord, keys: string[]) {
   return keys.some((key) => hasEvidenceValue(data[key]));
 }
+const DEFAULT_EVIDENCE_SOURCE_FILTERS = [
+  "BioGRID",
+  "HPA",
+  "IntAct",
+  "PDB",
+  "CORUM",
+];
 
+const EVIDENCE_SOURCE_KEYS = [
+  "sources",
+  "source",
+  "source_database",
+  "source_databases",
+  "sourceDatabase",
+  "sourceDatabases",
+  "databases",
+  "database",
+];
+
+function normalizeEvidenceSourceLabel(value: string) {
+  const cleaned = value
+    .trim()
+    .replace(/^["'\[]+|["'\]]+$/g, "")
+    .trim();
+
+  const lower = cleaned.toLowerCase();
+
+  if (lower.includes("biogrid")) {
+    return "BioGRID";
+  }
+
+  if (lower.includes("human protein atlas") || lower === "hpa") {
+    return "HPA";
+  }
+
+  if (lower.includes("intact")) {
+    return "IntAct";
+  }
+
+  if (lower.includes("rcsb") || lower === "pdb" || lower.includes("pdb")) {
+    return "PDB";
+  }
+
+  if (lower.includes("corum")) {
+    return "CORUM";
+  }
+
+  return cleaned;
+}
+
+function splitEvidenceSourceValue(value: unknown): string[] {
+  if (value === null || value === undefined || value === "") {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => splitEvidenceSourceValue(item));
+  }
+
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).flatMap((item) =>
+      splitEvidenceSourceValue(item)
+    );
+  }
+
+  const raw = String(value).trim();
+
+  if (!raw) {
+    return [];
+  }
+
+  if (
+    (raw.startsWith("[") && raw.endsWith("]")) ||
+    (raw.startsWith("{") && raw.endsWith("}"))
+  ) {
+    try {
+      return splitEvidenceSourceValue(JSON.parse(raw));
+    } catch {
+      // Fall through to text splitting.
+    }
+  }
+
+  return raw
+    .split(/[,;|]/)
+    .map((item) => normalizeEvidenceSourceLabel(item))
+    .filter(Boolean);
+}
+
+function extractEvidenceSources(data: DetailRecord) {
+  const sources = EVIDENCE_SOURCE_KEYS.flatMap((key) =>
+    splitEvidenceSourceValue(data[key])
+  );
+
+  return Array.from(new Set(sources));
+}
+
+function getNodeElementId(node: ElementDefinition) {
+  return String((node.data as DetailRecord | undefined)?.id || "");
+}
+
+function getEdgeEndpointIds(edge: ElementDefinition) {
+  const data = (edge.data || {}) as DetailRecord;
+
+  return {
+    source: String(data.source || ""),
+    target: String(data.target || ""),
+  };
+}
+
+function nodeMatchesFocus(node: ElementDefinition, focusNodeId?: string) {
+  if (!focusNodeId) {
+    return false;
+  }
+
+  const data = (node.data || {}) as DetailRecord;
+  const id = String(data.id || "");
+  const label = String(data.label || "");
+
+  return (
+    id === focusNodeId ||
+    id === `UniProt:${focusNodeId}` ||
+    id === `CORUM:${focusNodeId}` ||
+    label === focusNodeId
+  );
+}
 function applyEdgeEvidenceClasses(cy: Core) {
   cy.edges().forEach((edge) => {
     const edgeData = edge.data() as DetailRecord;
@@ -640,7 +765,63 @@ export default function NetworkGraph({
   const cyRef = useRef<Core | null>(null);
   const router = useRouter();
 
-  const [selectedElement, setSelectedElement] = useState<SelectedElement>(null);
+    const [selectedElement, setSelectedElement] = useState<SelectedElement>(null);
+  const [activeEvidenceSources, setActiveEvidenceSources] = useState<string[]>(
+    []
+  );
+
+  const evidenceSourceOptions = useMemo(() => {
+    const discoveredSources = elements.edges.flatMap((edge) =>
+      extractEvidenceSources((edge.data || {}) as DetailRecord)
+    );
+
+    return Array.from(
+      new Set([...DEFAULT_EVIDENCE_SOURCE_FILTERS, ...discoveredSources])
+    ).filter(Boolean);
+  }, [elements.edges]);
+
+  const filteredElements = useMemo(() => {
+    if (activeEvidenceSources.length === 0) {
+      return elements;
+    }
+
+    const activeSet = new Set(activeEvidenceSources);
+
+    const filteredEdges = elements.edges.filter((edge) => {
+      const edgeSources = extractEvidenceSources(
+        (edge.data || {}) as DetailRecord
+      );
+
+      return edgeSources.some((source) => activeSet.has(source));
+    });
+
+    const visibleNodeIds = new Set<string>();
+
+    filteredEdges.forEach((edge) => {
+      const { source, target } = getEdgeEndpointIds(edge);
+      visibleNodeIds.add(source);
+      visibleNodeIds.add(target);
+    });
+
+    const filteredNodes = elements.nodes.filter((node) => {
+      const nodeId = getNodeElementId(node);
+
+      return visibleNodeIds.has(nodeId) || nodeMatchesFocus(node, focusNodeId);
+    });
+
+    return {
+      nodes: filteredNodes,
+      edges: filteredEdges,
+    };
+  }, [activeEvidenceSources, elements, focusNodeId]);
+
+  function toggleEvidenceSource(source: string) {
+    setActiveEvidenceSources((current) =>
+      current.includes(source)
+        ? current.filter((item) => item !== source)
+        : [...current, source]
+    );
+  }
 
   const selectedNodeData =
     selectedElement?.kind === "node" ? selectedElement.data : null;
@@ -711,10 +892,11 @@ export default function NetworkGraph({
     graphName,
     downloadedAt: new Date().toISOString(),
     focusNodeId: focusNodeId ?? null,
-    nodeCount: elements.nodes.length,
-    edgeCount: elements.edges.length,
-    nodes: elements.nodes,
-    edges: elements.edges,
+        activeEvidenceSources,
+    nodeCount: filteredElements.nodes.length,
+    edgeCount: filteredElements.edges.length,
+    nodes: filteredElements.nodes,
+    edges: filteredElements.edges,
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -744,7 +926,7 @@ export default function NetworkGraph({
 
     setSelectedElement(null);
 
-    const focusedElements = addFocusToElements(elements, focusNodeId);
+        const focusedElements = addFocusToElements(filteredElements, focusNodeId);
 
     const cy = cytoscape({
       container: containerRef.current,
@@ -817,7 +999,7 @@ export default function NetworkGraph({
       cy.destroy();
       cyRef.current = null;
     };
-  }, [elements, focusNodeId, layoutName, showEdgeLabels]);
+    }, [filteredElements, focusNodeId, layoutName, showEdgeLabels]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -866,8 +1048,55 @@ export default function NetworkGraph({
   </button>
 </div>
         </div>
+        <div className="mb-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+                Evidence source filter
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Filter visible edges by evidence database. No selected filter
+                means all edges are shown.
+              </p>
+            </div>
 
+            <button
+              type="button"
+              onClick={() => setActiveEvidenceSources([])}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              Show All
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {evidenceSourceOptions.map((source) => {
+              const isActive = activeEvidenceSources.includes(source);
+
+              return (
+                <button
+                  key={source}
+                  type="button"
+                  onClick={() => toggleEvidenceSource(source)}
+                  className={
+                    isActive
+                      ? "rounded-full border border-cyan-400 bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-100"
+                      : "rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                  }
+                >
+                  {source}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="mt-2 text-xs text-slate-500">
+            Showing {filteredElements.nodes.length} nodes and{" "}
+            {filteredElements.edges.length} edges.
+          </p>
+        </div>
                 <div
+                
   ref={containerRef}
   className="h-[760px] w-full rounded-xl border border-slate-800 bg-slate-900"
 />
@@ -932,6 +1161,10 @@ export default function NetworkGraph({
             Co-complex only
           </span>
         </div>
+                <NetworkAttributeTable
+          nodes={filteredElements.nodes}
+          edges={filteredElements.edges}
+        />
       </section>
 
       <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl">
