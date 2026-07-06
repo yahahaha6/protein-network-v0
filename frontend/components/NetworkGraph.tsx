@@ -363,9 +363,9 @@ function getLayoutOptions(layoutName: NetworkGraphProps["layoutName"]) {
     return {
       name: "concentric",
       fit: true,
-      padding: 80,
+      padding: 120,
       animate: false,
-      minNodeSpacing: 70,
+      minNodeSpacing: 85,
       concentric: function (node: NodeSingular) {
         return node.data("isFocus") ? 10 : 1;
       },
@@ -420,8 +420,8 @@ export default function NetworkGraph({
   const selectedNodeHref = selectedNodeData ? getNodeHref(selectedNodeData) : null;
 
   function fitView() {
-    cyRef.current?.fit(undefined, 80);
-  }
+  cyRef.current?.fit(undefined, 120);
+}
 
   function resetLayout() {
     const cy = cyRef.current;
@@ -575,9 +575,9 @@ export default function NetworkGraph({
         </div>
 
         <div
-          ref={containerRef}
-          className="h-[640px] w-full rounded-xl border border-slate-800 bg-slate-900"
-        />
+  ref={containerRef}
+  className="h-[760px] w-full rounded-xl border border-slate-800 bg-slate-900"
+/>
       </section>
 
       <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl">

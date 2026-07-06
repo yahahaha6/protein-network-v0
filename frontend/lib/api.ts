@@ -46,12 +46,65 @@ export type NetworkEdge = {
 };
 
 export type NetworkResponse = {
+  center?: {
+    id?: string;
+    uniprotAc?: string;
+    label?: string;
+    type?: string;
+    [key: string]: unknown;
+  };
   nodes: NetworkNode[];
   edges: NetworkEdge[];
   total?: number;
   total_edges?: number;
   limit?: number;
   offset?: number;
+  pagination?: {
+    limit?: number;
+    offset?: number;
+    total?: number;
+    returned?: number;
+    nextOffset?: number | null;
+  };
+  stats?: {
+    nodeCount?: number;
+    edgeCount?: number;
+  };
+  truncated?: boolean;
+};
+
+export type GlobalPpiInfo = {
+  loaded: boolean;
+  dataFile?: string;
+  name?: string;
+  notes?: string;
+  nodeCount?: number;
+  edgeCount?: number;
+  exampleProteinIds?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type GlobalPpiProteinDetail = DetailRecord & {
+  id?: string;
+  key?: string;
+  type?: string;
+  label?: string;
+  summary?: {
+    uniprotAc?: string;
+    geneName?: string;
+    proteinName?: string;
+    category?: string;
+    sequenceLength?: string | number;
+    neighborCount?: number;
+    [key: string]: unknown;
+  };
+};
+
+export type GlobalPpiEdgeResponse = {
+  source: string;
+  target: string;
+  edge: NetworkEdge;
+  raw?: Record<string, unknown>;
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -156,5 +209,39 @@ export async function getComplexExtNetwork(
 }
 
 export function getTotalEdges(network: NetworkResponse) {
-  return network.total_edges ?? network.total ?? network.edges.length;
+  return (
+    network.pagination?.total ??
+    network.total_edges ??
+    network.total ??
+    network.edges.length
+  );
+}
+
+export async function getGlobalPpiInfo() {
+  return fetchJson<GlobalPpiInfo>(`${API_BASE_URL}/api/global-ppi/info`);
+}
+
+export async function getGlobalPpiProteinDetail(proteinId: string) {
+  return fetchJson<GlobalPpiProteinDetail>(
+    `${API_BASE_URL}/api/global-ppi/protein/${encodeURIComponent(proteinId)}`
+  );
+}
+
+export async function getGlobalPpiProteinNeighbors(
+  proteinId: string,
+  limit = 20
+) {
+  return fetchJson<NetworkResponse>(
+    `${API_BASE_URL}/api/global-ppi/protein/${encodeURIComponent(
+      proteinId
+    )}/neighbors?limit=${limit}`
+  );
+}
+
+export async function getGlobalPpiEdge(source: string, target: string) {
+  return fetchJson<GlobalPpiEdgeResponse>(
+    `${API_BASE_URL}/api/global-ppi/edge?source=${encodeURIComponent(
+      source
+    )}&target=${encodeURIComponent(target)}`
+  );
 }
