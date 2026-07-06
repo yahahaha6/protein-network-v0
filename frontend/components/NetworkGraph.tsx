@@ -19,6 +19,7 @@ type NetworkGraphProps = {
   layoutName?: "cose" | "concentric" | "circle";
   showEdgeLabels?: boolean;
   enableNodeNavigation?: boolean;
+  nodeNavigationMode?: "default" | "global-ppi";
   graphName?: string;
 };
 
@@ -33,12 +34,20 @@ type SelectedElement =
     }
   | null;
 
-function getNodeHref(data: DetailRecord) {
+function getNodeHref(
+  data: DetailRecord,
+  mode: NetworkGraphProps["nodeNavigationMode"] = "default"
+) {
   const rawId = String(data.id || "");
   const rawType = String(data.type || "").toLowerCase();
 
   if (rawType.includes("protein") || rawId.startsWith("UniProt:")) {
     const proteinId = rawId.replace("UniProt:", "");
+
+    if (mode === "global-ppi") {
+      return `/global-ppi/protein/${proteinId}/network`;
+    }
+
     return `/protein/${proteinId}`;
   }
 
@@ -485,6 +494,7 @@ export default function NetworkGraph({
   layoutName = "cose",
   showEdgeLabels = false,
   enableNodeNavigation = true,
+  nodeNavigationMode = "default",
   graphName = "network",
 }: NetworkGraphProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -501,7 +511,9 @@ export default function NetworkGraph({
       ? buildEdgeDetailData(selectedElement.data)
       : null;
 
-  const selectedNodeHref = selectedNodeData ? getNodeHref(selectedNodeData) : null;
+  const selectedNodeHref = selectedNodeData
+  ? getNodeHref(selectedNodeData, nodeNavigationMode)
+  : null;
   const selectedEdgeSummary =
   selectedElement?.kind === "edge" && selectedEdgeData
     ? {
@@ -725,12 +737,14 @@ export default function NetworkGraph({
 
               {selectedNodeHref && enableNodeNavigation && (
                 <button
-                  type="button"
-                  onClick={openSelectedNode}
-                  className="mt-3 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
-                >
-                  Open Detail Page
-                </button>
+  type="button"
+  onClick={openSelectedNode}
+  className="mt-3 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+>
+  {nodeNavigationMode === "global-ppi"
+    ? "Open Global Neighborhood"
+    : "Open Detail Page"}
+</button>
               )}
             </div>
 

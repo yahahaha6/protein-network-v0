@@ -208,13 +208,14 @@ export default async function GlobalPpiProteinNetworkPage({
         </section>
 
         <NetworkGraph
-          elements={network}
-          focusNodeId={focusNodeId}
-          layoutName="concentric"
-          showEdgeLabels={false}
-          enableNodeNavigation={false}
-          graphName={`global_ppi_${normalizedProteinId}_neighbors_limit_${limit}`}
-        />
+  elements={network}
+  focusNodeId={focusNodeId}
+  layoutName="concentric"
+  showEdgeLabels={false}
+  enableNodeNavigation={true}
+  nodeNavigationMode="global-ppi"
+  graphName={`global_ppi_${normalizedProteinId}_neighbors_limit_${limit}`}
+/>
       </div>
     </main>
   );
