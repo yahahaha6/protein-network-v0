@@ -567,6 +567,31 @@ export default function NetworkGraph({
     link.click();
   }
 
+  function downloadRawJson() {
+  const payload = {
+    graphName,
+    downloadedAt: new Date().toISOString(),
+    focusNodeId: focusNodeId ?? null,
+    nodeCount: elements.nodes.length,
+    edgeCount: elements.edges.length,
+    nodes: elements.nodes,
+    edges: elements.edges,
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `${makeSafeFileName(graphName)}_raw.json`;
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
   function openSelectedNode() {
     if (selectedNodeHref) {
       router.push(selectedNodeHref);
@@ -667,30 +692,38 @@ export default function NetworkGraph({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={fitView}
-              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
-            >
-              Fit View
-            </button>
+  <button
+    type="button"
+    onClick={fitView}
+    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+  >
+    Fit View
+  </button>
 
-            <button
-              type="button"
-              onClick={resetLayout}
-              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
-            >
-              Reset Layout
-            </button>
+  <button
+    type="button"
+    onClick={resetLayout}
+    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+  >
+    Reset Layout
+  </button>
 
-            <button
-              type="button"
-              onClick={downloadPng}
-              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
-            >
-              Download PNG
-            </button>
-          </div>
+  <button
+    type="button"
+    onClick={downloadPng}
+    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+  >
+    Download PNG
+  </button>
+
+  <button
+    type="button"
+    onClick={downloadRawJson}
+    className="rounded-lg border border-cyan-800 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-950/50"
+  >
+    Download Raw JSON
+  </button>
+</div>
         </div>
 
         <div
@@ -736,7 +769,7 @@ export default function NetworkGraph({
               </p>
 
               {selectedNodeHref && enableNodeNavigation && (
-                <button
+               <button
   type="button"
   onClick={openSelectedNode}
   className="mt-3 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
