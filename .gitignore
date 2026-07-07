@@ -1,22 +1,42 @@
-# Environment files
-.env
-*.env
-backend/.env
-
-# Python
+# Python virtual environments
+.venv/
+venv/
+env/
 backend/.venv/
+backend/venv/
+
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment variables
+.env
+.env.*
+backend/.env
+backend/.env.*
+
+# Local data, never upload real datasets
+data/
+backend/data/
+
+# Event / log / temporary files
+*.event
+*.events
+*.log
+*.tmp
 
 # Node / Next.js
+node_modules/
 frontend/node_modules/
+.next/
 frontend/.next/
-frontend/out/
+out/
+dist/
 
-# System
+# OS / editor
 .DS_Store
-
-# Local/private data files
-data/
-data/*
-!data/README.md
+.vscode/
+.idea/
