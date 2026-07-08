@@ -155,6 +155,70 @@ def _global_ppi_legend() -> NetworkLegend:
         ],
     )
 
+def _matches_optional_bool(value: bool, expected: bool | None) -> bool:
+    if expected is None:
+        return True
+
+    return value is expected
+
+
+def _normalize_filter_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    text = value.strip()
+
+    if not text:
+        return None
+
+    return text.lower()
+
+
+def _edge_matches_source(edge: VizEdge, source_filter: str | None) -> bool:
+    normalized = _normalize_filter_text(source_filter)
+
+    if normalized is None:
+        return True
+
+    return any(normalized in source.lower() for source in edge.evidenceSources)
+
+
+def _node_matches_category(node: VizNode, category_filter: str | None) -> bool:
+    normalized = _normalize_filter_text(category_filter)
+
+    if normalized is None:
+        return True
+
+    return node.proteinCategory.lower() == normalized
+
+
+def _edge_passes_filters(
+    *,
+    edge: VizEdge,
+    other_node: VizNode,
+    source: str | None,
+    protein_category: str | None,
+    has_ddi: bool | None,
+    has_dmi: bool | None,
+    has_pdb: bool | None,
+) -> bool:
+    if not _edge_matches_source(edge, source):
+        return False
+
+    if not _node_matches_category(other_node, protein_category):
+        return False
+
+    if not _matches_optional_bool(edge.hasDDI, has_ddi):
+        return False
+
+    if not _matches_optional_bool(edge.hasDMI, has_dmi):
+        return False
+
+    if not _matches_optional_bool(edge.hasStructuralEvidence, has_pdb):
+        return False
+
+    return True
+
 
 @router.get("/global-ppi/info")
 def get_global_ppi_info():
@@ -236,6 +300,11 @@ def get_global_ppi_protein(uniprot_ac: str):
 def get_global_ppi_neighbors(
     uniprot_ac: str,
     limit: int = Query(default=20, ge=1, le=300),
+    source: str | None = Query(default=None),
+    protein_category: str | None = Query(default=None),
+    has_ddi: bool | None = Query(default=None),
+    has_dmi: bool | None = Query(default=None),
+    has_pdb: bool | None = Query(default=None),
 ):
     if not global_ppi_store.loaded:
         return JSONResponse(
@@ -258,26 +327,45 @@ def get_global_ppi_neighbors(
             },
         )
 
-    neighbor_edges = global_ppi_store.get_neighbor_edges(protein_id, limit)
+    all_neighbor_edges = global_ppi_store.neighbor_edges_by_id.get(protein_id, [])
 
     nodes_by_id: dict[str, VizNode] = {
         protein_id: normalize_protein_node(center_row, is_center=True)
     }
 
     viz_edges: list[VizEdge] = []
+    matched_count = 0
 
-    for edge in neighbor_edges:
+    for edge in all_neighbor_edges:
         source_id = normalize_protein_id(edge.get("source"))
         target_id = normalize_protein_id(edge.get("target"))
 
         other_id = target_id if source_id == protein_id else source_id
         other_row = global_ppi_store.get_node(other_id) or _fallback_protein_raw(other_id)
+        other_node = normalize_protein_node(other_row)
+        viz_edge = _make_global_ppi_edge(edge)
 
-        nodes_by_id[other_id] = normalize_protein_node(other_row)
-        viz_edges.append(_make_global_ppi_edge(edge))
+        if not _edge_passes_filters(
+            edge=viz_edge,
+            other_node=other_node,
+            source=source,
+            protein_category=protein_category,
+            has_ddi=has_ddi,
+            has_dmi=has_dmi,
+            has_pdb=has_pdb,
+        ):
+            continue
+
+        matched_count += 1
+
+        if len(viz_edges) >= limit:
+            continue
+
+        nodes_by_id[other_id] = other_node
+        viz_edges.append(viz_edge)
 
     viz_nodes = list(nodes_by_id.values())
-    total = len(global_ppi_store.neighbor_edges_by_id.get(protein_id, []))
+    total = matched_count
 
     response = NetworkResponse(
         graphType="global_ppi_neighborhood",
@@ -290,10 +378,15 @@ def get_global_ppi_neighbors(
             limit=limit,
             offset=0,
             total=total,
-            hasMore=limit < total,
+            hasMore=len(viz_edges) < total,
         ),
         filters={
             "limit": limit,
+            "source": source,
+            "protein_category": protein_category,
+            "has_ddi": has_ddi,
+            "has_dmi": has_dmi,
+            "has_pdb": has_pdb,
         },
         warnings=[
             "This endpoint now returns the standard NetworkResponse model. Frontend code should use normalized node and edge fields instead of raw Cytoscape element data."
