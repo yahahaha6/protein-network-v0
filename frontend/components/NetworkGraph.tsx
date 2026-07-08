@@ -14,8 +14,60 @@ type NetworkElements = {
   edges: ElementDefinition[];
 };
 
+type StandardVizNode = {
+  id: string;
+  label: string;
+  type?: string;
+  displayName?: string | null;
+  proteinCategory?: string;
+  badges?: string[];
+  hpaProfile?: unknown;
+  externalLinks?: unknown[];
+  complexIds?: string[];
+  complexNames?: string[];
+  raw?: DetailRecord;
+};
+
+type StandardVizEdge = {
+  id: string;
+  source: string;
+  target: string;
+  type?: string;
+  label?: string | null;
+  evidenceSources?: string[];
+  hpaDatasets?: string[];
+  methods?: string[];
+  publications?: string[];
+  supportingStructures?: string[];
+  ddi?: string[];
+  dmi?: string[];
+  hasDDI?: boolean;
+  hasDMI?: boolean;
+  hasStructuralEvidence?: boolean;
+  isConfirmedPpi?: boolean;
+  isCoComplexOnly?: boolean;
+  evidenceLevel?: string;
+  evidenceSummary?: unknown;
+  externalLinks?: unknown[];
+  raw?: DetailRecord;
+};
+
+type StandardNetworkResponse = {
+  graphType?: string;
+  center?: StandardVizNode | null;
+  nodes: StandardVizNode[];
+  edges: StandardVizEdge[];
+  stats?: unknown;
+  legend?: unknown;
+  pagination?: unknown;
+  filters?: unknown;
+  warnings?: string[];
+};
+
+type NetworkGraphInput = NetworkElements | StandardNetworkResponse;
+
 type NetworkGraphProps = {
-  elements: NetworkElements;
+  elements: NetworkGraphInput;
   focusNodeId?: string;
   layoutName?: "cose" | "concentric" | "circle";
   showEdgeLabels?: boolean;
@@ -60,6 +112,110 @@ function getNodeHref(
   return null;
 }
 
+function stripKnownIdPrefix(value: string) {
+  return value.replace(/^UniProt:/, "").replace(/^CORUM:/, "");
+}
+
+function idsMatch(left: string, right?: string) {
+  if (!right) {
+    return false;
+  }
+
+  return (
+    left === right ||
+    stripKnownIdPrefix(left) === stripKnownIdPrefix(right)
+  );
+}
+
+function isCytoscapeElementInput(
+  elements: NetworkGraphInput
+): elements is NetworkElements {
+  return (
+    Array.isArray(elements.nodes) &&
+    Array.isArray(elements.edges) &&
+    elements.nodes.every((node) => "data" in node)
+  );
+}
+
+function standardNodeTypeForCytoscape(node: StandardVizNode) {
+  const badges = node.badges ?? [];
+
+  if (badges.includes("CENTER")) {
+    return "CenterProtein";
+  }
+
+  if (node.type === "complex") {
+    return "Complex";
+  }
+
+  if (node.type === "protein") {
+    return "Protein";
+  }
+
+  return node.type || "Unknown";
+}
+
+function toNetworkElements(elements: NetworkGraphInput): NetworkElements {
+  if (isCytoscapeElementInput(elements)) {
+    return elements;
+  }
+
+  return {
+    nodes: elements.nodes.map((node) => {
+      const nodeType = standardNodeTypeForCytoscape(node);
+
+      return {
+        data: {
+          id: node.id,
+          label: node.label || node.id,
+          type: nodeType,
+          nodeType: node.type,
+          displayName: node.displayName,
+          category: node.proteinCategory || "Unknown",
+          proteinCategory: node.proteinCategory || "Unknown",
+          badges: node.badges ?? [],
+          hpaProfile: node.hpaProfile,
+          externalLinks: node.externalLinks ?? [],
+          complexIds: node.complexIds ?? [],
+          complexNames: node.complexNames ?? [],
+          raw: node.raw ?? {},
+        },
+      };
+    }),
+    edges: elements.edges.map((edge) => {
+      return {
+        data: {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          type: edge.type || "ppi",
+          relationshipType: edge.type || "ppi",
+          label: edge.label || edge.type || "ppi",
+          evidenceSources: edge.evidenceSources ?? [],
+          sources: edge.evidenceSources ?? [],
+          hpaDatasets: edge.hpaDatasets ?? [],
+          hpa_datasets: edge.hpaDatasets ?? [],
+          methods: edge.methods ?? [],
+          publications: edge.publications ?? [],
+          supportingStructures: edge.supportingStructures ?? [],
+          supporting_structures: edge.supportingStructures ?? [],
+          ddi: edge.ddi ?? [],
+          dmi: edge.dmi ?? [],
+          hasDDI: Boolean(edge.hasDDI),
+          hasDMI: Boolean(edge.hasDMI),
+          hasStructuralEvidence: Boolean(edge.hasStructuralEvidence),
+          isConfirmedPpi: Boolean(edge.isConfirmedPpi),
+          isCoComplexOnly: Boolean(edge.isCoComplexOnly),
+          evidenceLevel: edge.evidenceLevel || "unknown",
+          evidenceSummary: edge.evidenceSummary,
+          externalLinks: edge.externalLinks ?? [],
+          raw: edge.raw ?? {},
+        },
+      };
+    }),
+  };
+}
+
 function addFocusToElements(
   elements: NetworkElements,
   focusNodeId?: string
@@ -75,10 +231,8 @@ function addFocusToElements(
       const nodeLabel = String(nodeData.label || "");
 
       const isFocus =
-        nodeId === focusNodeId ||
-        nodeId === `UniProt:${focusNodeId}` ||
-        nodeId === `CORUM:${focusNodeId}` ||
-        nodeLabel === focusNodeId;
+        idsMatch(nodeId, focusNodeId) ||
+        idsMatch(nodeLabel, focusNodeId);
 
       if (isFocus) {
         nodeData.isFocus = "true";
@@ -367,6 +521,8 @@ const DEFAULT_EVIDENCE_SOURCE_FILTERS = [
 ];
 
 const EVIDENCE_SOURCE_KEYS = [
+  "evidenceSources",
+  "evidence_sources",
   "sources",
   "source",
   "source_database",
@@ -476,18 +632,14 @@ function nodeMatchesFocus(node: ElementDefinition, focusNodeId?: string) {
   const id = String(data.id || "");
   const label = String(data.label || "");
 
-  return (
-    id === focusNodeId ||
-    id === `UniProt:${focusNodeId}` ||
-    id === `CORUM:${focusNodeId}` ||
-    label === focusNodeId
-  );
+  return idsMatch(id, focusNodeId) || idsMatch(label, focusNodeId);
 }
 function applyEdgeEvidenceClasses(cy: Core) {
   cy.edges().forEach((edge) => {
     const edgeData = edge.data() as DetailRecord;
 
     const hasDdi = edgeHasAnyEvidenceField(edgeData, [
+      "hasDDI",
       "ddi",
       "DDI",
       "domain_domain_interactions",
@@ -495,6 +647,7 @@ function applyEdgeEvidenceClasses(cy: Core) {
     ]);
 
     const hasDmi = edgeHasAnyEvidenceField(edgeData, [
+      "hasDMI",
       "dmi",
       "DMI",
       "domain_motif_interactions",
@@ -765,29 +918,31 @@ export default function NetworkGraph({
   const cyRef = useRef<Core | null>(null);
   const router = useRouter();
 
+  const graphElements = useMemo(() => toNetworkElements(elements), [elements]);
+
     const [selectedElement, setSelectedElement] = useState<SelectedElement>(null);
   const [activeEvidenceSources, setActiveEvidenceSources] = useState<string[]>(
     []
   );
 
   const evidenceSourceOptions = useMemo(() => {
-    const discoveredSources = elements.edges.flatMap((edge) =>
+    const discoveredSources = graphElements.edges.flatMap((edge) =>
       extractEvidenceSources((edge.data || {}) as DetailRecord)
     );
 
     return Array.from(
       new Set([...DEFAULT_EVIDENCE_SOURCE_FILTERS, ...discoveredSources])
     ).filter(Boolean);
-  }, [elements.edges]);
+  }, [graphElements.edges]);
 
   const filteredElements = useMemo(() => {
     if (activeEvidenceSources.length === 0) {
-      return elements;
+      return graphElements;
     }
 
     const activeSet = new Set(activeEvidenceSources);
 
-    const filteredEdges = elements.edges.filter((edge) => {
+    const filteredEdges = graphElements.edges.filter((edge) => {
       const edgeSources = extractEvidenceSources(
         (edge.data || {}) as DetailRecord
       );
@@ -803,7 +958,7 @@ export default function NetworkGraph({
       visibleNodeIds.add(target);
     });
 
-    const filteredNodes = elements.nodes.filter((node) => {
+    const filteredNodes = graphElements.nodes.filter((node) => {
       const nodeId = getNodeElementId(node);
 
       return visibleNodeIds.has(nodeId) || nodeMatchesFocus(node, focusNodeId);
@@ -813,7 +968,7 @@ export default function NetworkGraph({
       nodes: filteredNodes,
       edges: filteredEdges,
     };
-  }, [activeEvidenceSources, elements, focusNodeId]);
+  }, [activeEvidenceSources, graphElements, focusNodeId]);
 
   function toggleEvidenceSource(source: string) {
     setActiveEvidenceSources((current) =>

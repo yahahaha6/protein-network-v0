@@ -37,7 +37,7 @@ export default async function GlobalPpiProteinNetworkPage({
   const resolvedSearchParams = await searchParams;
 
   const normalizedProteinId = proteinId.replace("UniProt:", "");
-  const focusNodeId = `UniProt:${normalizedProteinId}`;
+  const focusNodeId = normalizedProteinId;
   const limit = parseLimit(resolvedSearchParams.limit);
 
   let network: Awaited<ReturnType<typeof getGlobalPpiProteinNeighbors>> | null =
@@ -81,13 +81,19 @@ export default async function GlobalPpiProteinNetworkPage({
   }
 
   const centerLabel =
-    network.center?.label || network.center?.uniprotAc || normalizedProteinId;
+    network.center?.displayName ||
+    network.center?.label ||
+    network.center?.id ||
+    normalizedProteinId;
 
   const totalEdges = getTotalEdges(network);
+  const hasMore = Boolean(network.pagination?.hasMore);
+
   const isShowingAll =
-  resolvedSearchParams.limit?.toLowerCase() === "all" ||
-  network.edges.length >= totalEdges ||
-  !network.truncated;
+    resolvedSearchParams.limit?.toLowerCase() === "all" ||
+    limit >= 200 ||
+    network.edges.length >= totalEdges ||
+    !hasMore;
 
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
@@ -187,21 +193,21 @@ export default async function GlobalPpiProteinNetworkPage({
               </Link>
 
               <Link
-                href={`/global-ppi/protein/${normalizedProteinId}/network?limit=all`}
+                href={`/global-ppi/protein/${normalizedProteinId}/network?limit=200`}
                 className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
                   isShowingAll
                     ? "border-cyan-400 bg-cyan-500 text-slate-950"
                     : "border-slate-700 text-slate-300 hover:border-cyan-400 hover:text-cyan-300"
                 }`}
               >
-                Show All
+                Show 200
               </Link>
             </div>
           </div>
 
-          {network.truncated && (
+          {hasMore && (
             <div className="mt-5 rounded-xl border border-amber-900/70 bg-amber-950/20 p-4 text-sm text-amber-200">
-              This view is truncated. Use Show 50 or Show All to display more
+              This view is truncated. Use Show 50 or Show 200 to display more
               neighbors.
             </div>
           )}
