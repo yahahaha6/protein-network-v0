@@ -1691,13 +1691,13 @@ export default function NetworkGraph({
               )}
             </div>
 
-            {selectedNodeData.hpaProfile &&
-              typeof selectedNodeData.hpaProfile === "object" && (
-                <ExpressionProfileCard
-                  data={selectedNodeData.hpaProfile as Record<string, unknown>}
-                  compact
-                />
-              )}
+            {typeof selectedNodeData.hpaProfile === "object" &&
+            selectedNodeData.hpaProfile !== null ? (
+              <ExpressionProfileCard
+                data={selectedNodeData.hpaProfile as Record<string, unknown>}
+                compact
+              />
+            ) : null}
 
             <DetailFields title="Node Fields" data={selectedNodeData} />
           </div>
