@@ -375,6 +375,114 @@ function buildEdgeDetailData(edgeData: DetailRecord): DetailRecord {
   };
 }
 
+
+function toDisplayList(value: unknown): string[] {
+  if (value === null || value === undefined || value === "") {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => toDisplayList(item));
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    if (record.label || record.url) {
+      return [String(record.label || record.url)];
+    }
+
+    return [JSON.stringify(record)];
+  }
+
+  const text = String(value).trim();
+
+  if (
+    !text ||
+    ["nan", "none", "null", "undefined", "n/a", "na", "[]"].includes(
+      text.toLowerCase()
+    )
+  ) {
+    return [];
+  }
+
+  return [text];
+}
+
+function toExternalLinks(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => item as Record<string, unknown>)
+    .filter((item) => item && typeof item.url === "string");
+}
+
+function renderValueList(value: unknown, emptyLabel = "None") {
+  const items = toDisplayList(value);
+
+  if (items.length === 0) {
+    return <span className="text-slate-500">{emptyLabel}</span>;
+  }
+
+  return (
+    <ul className="space-y-1">
+      {items.map((item, index) => (
+        <li key={`${item}-${index}`} className="break-words text-slate-200">
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function renderExternalLinks(value: unknown) {
+  const links = toExternalLinks(value);
+
+  if (links.length === 0) {
+    return <span className="text-slate-500">No external links</span>;
+  }
+
+  return (
+    <ul className="space-y-1">
+      {links.map((link, index) => (
+        <li key={`${String(link.url)}-${index}`}>
+          <a
+            href={String(link.url)}
+            target="_blank"
+            rel="noreferrer"
+            className="break-words text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline"
+          >
+            {String(link.label || link.url)}
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function renderStatusBadge(active: boolean, activeLabel: string, inactiveLabel: string) {
+  return (
+    <span
+      className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-xs font-semibold ${
+        active
+          ? "border-emerald-700 bg-emerald-950/40 text-emerald-300"
+          : "border-slate-700 bg-slate-950/50 text-slate-400"
+      }`}
+    >
+      {active ? activeLabel : inactiveLabel}
+    </span>
+  );
+}
+
+function evidenceLevelLabel(value: unknown) {
+  const text = String(value || "unknown").replace(/_/g, " ");
+
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+
 function cleanNodeId(value: unknown) {
   return String(value || "").replace("UniProt:", "").replace("CORUM:", "");
 }
@@ -1495,106 +1603,166 @@ export default function NetworkGraph({
         )}
 
         {selectedElement?.kind === "edge" && selectedEdgeData && selectedEdgeSummary && (
-  <div className="mt-4 space-y-4">
-    <div className="rounded-xl border border-amber-900/70 bg-amber-950/20 p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">
-        Selected Edge Evidence
-      </p>
+          <div className="mt-4 space-y-4">
+            <div className="rounded-xl border border-amber-900/70 bg-amber-950/20 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">
+                Interaction Summary
+              </p>
 
-      <h3 className="mt-1 break-words text-base font-semibold text-slate-100">
-        {getEdgeTitle(selectedElement.data)}
-      </h3>
+              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">
+                {getEdgeTitle(selectedElement.data)}
+              </h3>
 
-      <div className="mt-4 grid gap-3 text-sm">
-        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
-            Source
-          </p>
-          <p className="mt-1 break-words font-medium text-slate-200">
-            {selectedEdgeSummary.source}
-          </p>
-        </div>
+              <div className="mt-4 grid gap-3 text-sm">
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    Source
+                  </p>
+                  <p className="mt-1 break-words font-medium text-slate-200">
+                    {selectedEdgeSummary.source}
+                  </p>
+                </div>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
-            Target
-          </p>
-          <p className="mt-1 break-words font-medium text-slate-200">
-            {selectedEdgeSummary.target}
-          </p>
-        </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    Target
+                  </p>
+                  <p className="mt-1 break-words font-medium text-slate-200">
+                    {selectedEdgeSummary.target}
+                  </p>
+                </div>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
-            Relationship Type
-          </p>
-          <p className="mt-1 break-words font-medium text-slate-200">
-            {selectedEdgeSummary.type}
-          </p>
-        </div>
-      </div>
-    </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    Relationship Type
+                  </p>
+                  <p className="mt-1 break-words font-medium text-slate-200">
+                    {selectedEdgeSummary.type}
+                  </p>
+                </div>
 
-    <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-        Evidence Summary
-      </p>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    Evidence Level
+                  </p>
+                  <p className="mt-1 break-words font-medium text-slate-200">
+                    {evidenceLevelLabel(selectedEdgeData.evidenceLevel)}
+                  </p>
+                </div>
 
-      <dl className="mt-3 space-y-3 text-sm">
-        <div>
-          <dt className="text-slate-500">Source databases</dt>
-          <dd className="mt-1 break-words text-slate-200">
-            {selectedEdgeSummary.sources}
-          </dd>
-        </div>
+                <div className="flex flex-wrap gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  {renderStatusBadge(
+                    Boolean(selectedEdgeData.isConfirmedPpi),
+                    "Confirmed direct PPI",
+                    "Not confirmed direct PPI"
+                  )}
 
-        <div>
-          <dt className="text-slate-500">Experimental methods</dt>
-          <dd className="mt-1 break-words text-slate-200">
-            {selectedEdgeSummary.methods}
-          </dd>
-        </div>
+                  {renderStatusBadge(
+                    Boolean(selectedEdgeData.isCoComplexOnly),
+                    "Co-complex only",
+                    "Not co-complex only"
+                  )}
+                </div>
+              </div>
+            </div>
 
-        <div>
-          <dt className="text-slate-500">Publications</dt>
-          <dd className="mt-1 break-words text-slate-200">
-            {selectedEdgeSummary.publications}
-          </dd>
-        </div>
+            <div className="rounded-xl border border-pink-900/70 bg-pink-950/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-pink-300">
+                DDI / DMI Evidence
+              </p>
 
-        <div>
-          <dt className="text-slate-500">Supporting structures</dt>
-          <dd className="mt-1 break-words text-slate-200">
-            {selectedEdgeSummary.structures}
-          </dd>
-        </div>
+              <div className="mt-3 grid gap-3 text-sm">
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="mb-2">
+                    {renderStatusBadge(
+                      Boolean(selectedEdgeData.hasDDI),
+                      "DDI-supported",
+                      "No DDI evidence"
+                    )}
+                  </div>
+                  {renderValueList(selectedEdgeData.ddi, "No DDI records")}
+                </div>
 
-        <div>
-          <dt className="text-slate-500">Gold record count</dt>
-          <dd className="mt-1 break-words text-slate-200">
-            {selectedEdgeSummary.goldRecordCount}
-          </dd>
-        </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="mb-2">
+                    {renderStatusBadge(
+                      Boolean(selectedEdgeData.hasDMI),
+                      "DMI-supported",
+                      "No DMI evidence"
+                    )}
+                  </div>
+                  {renderValueList(selectedEdgeData.dmi, "No DMI records")}
+                </div>
+              </div>
+            </div>
 
-        <div>
-          <dt className="text-slate-500">DDI</dt>
-          <dd className="mt-1 break-words text-slate-200">
-            {selectedEdgeSummary.ddi}
-          </dd>
-        </div>
+            <div className="rounded-xl border border-sky-900/70 bg-sky-950/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-sky-300">
+                Structural Evidence
+              </p>
 
-        <div>
-          <dt className="text-slate-500">DMI</dt>
-          <dd className="mt-1 break-words text-slate-200">
-            {selectedEdgeSummary.dmi}
-          </dd>
-        </div>
-      </dl>
-    </div>
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-sm">
+                <div className="mb-2">
+                  {renderStatusBadge(
+                    Boolean(selectedEdgeData.hasStructuralEvidence),
+                    "Structural evidence available",
+                    "No structural evidence"
+                  )}
+                </div>
+                {renderValueList(
+                  selectedEdgeData.supportingStructures ||
+                    selectedEdgeData.supporting_structures,
+                  "No supporting PDB structures"
+                )}
+              </div>
+            </div>
 
-    <DetailFields title="Full Edge Fields" data={selectedEdgeData} />
-  </div>
-)}
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+                Source Databases
+              </p>
+
+              <div className="mt-3 text-sm">
+                {renderValueList(
+                  selectedEdgeData.evidenceSources || selectedEdgeData.sources,
+                  "No source databases"
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+                Experimental Methods
+              </p>
+
+              <div className="mt-3 text-sm">
+                {renderValueList(selectedEdgeData.methods, "No methods")}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+                Publications
+              </p>
+
+              <div className="mt-3 text-sm">
+                {renderValueList(selectedEdgeData.publications, "No publications")}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+                External Links
+              </p>
+
+              <div className="mt-3 text-sm">
+                {renderExternalLinks(selectedEdgeData.externalLinks)}
+              </div>
+            </div>
+
+            <DetailFields title="Full Edge Fields" data={selectedEdgeData} />
+          </div>
+        )}
       </aside>
     </div>
   );
