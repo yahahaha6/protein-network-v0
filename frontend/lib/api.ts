@@ -114,6 +114,14 @@ export type ProteinNeighborFilters = {
   has_pdb?: boolean;
 };
 
+export type ComplexIntraFilters = {
+  confirmed_ppi?: boolean;
+  co_complex_only?: boolean;
+  has_ddi?: boolean;
+  has_dmi?: boolean;
+  has_pdb?: boolean;
+};
+
 export type GlobalPpiNeighborFilters = {
   source?: string;
   protein_category?: string;
@@ -269,9 +277,36 @@ export async function getComplexDetail(complexId: string) {
   return fetchJson<DetailRecord>(`${API_BASE_URL}/api/complex/${complexId}`);
 }
 
-export async function getComplexIntraNetwork(complexId: string) {
+export async function getComplexIntraNetwork(
+  complexId: string,
+  filters: ComplexIntraFilters = {}
+) {
+  const query = new URLSearchParams();
+
+  if (typeof filters.confirmed_ppi === "boolean") {
+    query.set("confirmed_ppi", String(filters.confirmed_ppi));
+  }
+
+  if (typeof filters.co_complex_only === "boolean") {
+    query.set("co_complex_only", String(filters.co_complex_only));
+  }
+
+  if (typeof filters.has_ddi === "boolean") {
+    query.set("has_ddi", String(filters.has_ddi));
+  }
+
+  if (typeof filters.has_dmi === "boolean") {
+    query.set("has_dmi", String(filters.has_dmi));
+  }
+
+  if (typeof filters.has_pdb === "boolean") {
+    query.set("has_pdb", String(filters.has_pdb));
+  }
+
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+
   return fetchJson<NetworkResponse>(
-    `${API_BASE_URL}/api/complex/${complexId}/intra`
+    `${API_BASE_URL}/api/complex/${complexId}/intra${suffix}`
   );
 }
 
