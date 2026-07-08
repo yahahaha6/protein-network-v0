@@ -27,31 +27,59 @@ export type SearchApiResponse =
 export type DetailRecord = Record<string, unknown>;
 
 export type NetworkNode = {
-  data: {
+  data?: {
     id: string;
     label?: string;
     type?: string;
     [key: string]: unknown;
   };
+  id?: string;
+  label?: string;
+  type?: string;
+  displayName?: string;
+  proteinCategory?: string;
+  badges?: string[];
+  hpaProfile?: Record<string, unknown>;
+  externalLinks?: Record<string, unknown>[];
+  raw?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type NetworkEdge = {
-  data: {
+  data?: {
     id: string;
     source: string;
     target: string;
     type?: string;
     [key: string]: unknown;
   };
+  id?: string;
+  source?: string;
+  target?: string;
+  type?: string;
+  label?: string;
+  evidenceSources?: string[];
+  methods?: string[];
+  publications?: string[];
+  supportingStructures?: string[];
+  ddi?: string[];
+  dmi?: string[];
+  hasDDI?: boolean;
+  hasDMI?: boolean;
+  hasStructuralEvidence?: boolean;
+  isConfirmedPpi?: boolean;
+  isCoComplexOnly?: boolean;
+  evidenceLevel?: string;
+  evidenceSummary?: Record<string, unknown>;
+  externalLinks?: Record<string, unknown>[];
+  raw?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type NetworkResponse = {
-  center?: {
-    id?: string;
+  graphType?: string;
+  center?: NetworkNode & {
     uniprotAc?: string;
-    label?: string;
-    type?: string;
-    [key: string]: unknown;
   };
   nodes: NetworkNode[];
   edges: NetworkEdge[];
@@ -65,12 +93,25 @@ export type NetworkResponse = {
     total?: number;
     returned?: number;
     nextOffset?: number | null;
+    hasMore?: boolean;
   };
   stats?: {
     nodeCount?: number;
     edgeCount?: number;
+    [key: string]: unknown;
   };
+  filters?: Record<string, unknown>;
+  legend?: Record<string, unknown>;
+  warnings?: string[];
   truncated?: boolean;
+};
+
+export type GlobalPpiNeighborFilters = {
+  source?: string;
+  protein_category?: string;
+  has_ddi?: boolean;
+  has_dmi?: boolean;
+  has_pdb?: boolean;
 };
 
 export type GlobalPpiInfo = {
@@ -229,12 +270,37 @@ export async function getGlobalPpiProteinDetail(proteinId: string) {
 
 export async function getGlobalPpiProteinNeighbors(
   proteinId: string,
-  limit = 20
+  limit = 20,
+  filters: GlobalPpiNeighborFilters = {}
 ) {
+  const query = new URLSearchParams({
+    limit: String(limit),
+  });
+
+  if (filters.source) {
+    query.set("source", filters.source);
+  }
+
+  if (filters.protein_category) {
+    query.set("protein_category", filters.protein_category);
+  }
+
+  if (typeof filters.has_ddi === "boolean") {
+    query.set("has_ddi", String(filters.has_ddi));
+  }
+
+  if (typeof filters.has_dmi === "boolean") {
+    query.set("has_dmi", String(filters.has_dmi));
+  }
+
+  if (typeof filters.has_pdb === "boolean") {
+    query.set("has_pdb", String(filters.has_pdb));
+  }
+
   return fetchJson<NetworkResponse>(
     `${API_BASE_URL}/api/global-ppi/protein/${encodeURIComponent(
       proteinId
-    )}/neighbors?limit=${limit}`
+    )}/neighbors?${query.toString()}`
   );
 }
 

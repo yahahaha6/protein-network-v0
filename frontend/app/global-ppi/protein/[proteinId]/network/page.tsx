@@ -8,6 +8,11 @@ type GlobalPpiProteinNetworkPageProps = {
   }>;
   searchParams: Promise<{
     limit?: string;
+    source?: string;
+    protein_category?: string;
+    has_ddi?: string;
+    has_dmi?: string;
+    has_pdb?: string;
   }>;
 };
 
@@ -29,6 +34,34 @@ function parseLimit(value: string | undefined) {
   return parsed;
 }
 
+function parseOptionalBoolean(value: string | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = value.toLowerCase();
+
+  if (normalized === "true") {
+    return true;
+  }
+
+  if (normalized === "false") {
+    return false;
+  }
+
+  return undefined;
+}
+
+function filterButtonClass(active: boolean) {
+  return active
+    ? "rounded-full border border-cyan-400 bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-100"
+    : "rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800";
+}
+
+const SOURCE_FILTER_OPTIONS = ["BioGRID", "HPA", "IntAct", "PDB"];
+const PROTEIN_CATEGORY_OPTIONS = ["TF", "EF", "TF_and_EF", "Unknown"];
+
+
 export default async function GlobalPpiProteinNetworkPage({
   params,
   searchParams,
@@ -40,12 +73,64 @@ export default async function GlobalPpiProteinNetworkPage({
   const focusNodeId = normalizedProteinId;
   const limit = parseLimit(resolvedSearchParams.limit);
 
+  const activeFilters = {
+    source: resolvedSearchParams.source || undefined,
+    protein_category: resolvedSearchParams.protein_category || undefined,
+    has_ddi: parseOptionalBoolean(resolvedSearchParams.has_ddi),
+    has_dmi: parseOptionalBoolean(resolvedSearchParams.has_dmi),
+    has_pdb: parseOptionalBoolean(resolvedSearchParams.has_pdb),
+  };
+
+  function buildNetworkHref(
+    nextLimit: number,
+    overrides: Partial<typeof activeFilters> = {}
+  ) {
+    const nextFilters = {
+      ...activeFilters,
+      ...overrides,
+    };
+
+    const query = new URLSearchParams({
+      limit: String(nextLimit),
+    });
+
+    if (nextFilters.source) {
+      query.set("source", nextFilters.source);
+    }
+
+    if (nextFilters.protein_category) {
+      query.set("protein_category", nextFilters.protein_category);
+    }
+
+    if (typeof nextFilters.has_ddi === "boolean") {
+      query.set("has_ddi", String(nextFilters.has_ddi));
+    }
+
+    if (typeof nextFilters.has_dmi === "boolean") {
+      query.set("has_dmi", String(nextFilters.has_dmi));
+    }
+
+    if (typeof nextFilters.has_pdb === "boolean") {
+      query.set("has_pdb", String(nextFilters.has_pdb));
+    }
+
+    return `/global-ppi/protein/${normalizedProteinId}/network?${query.toString()}`;
+  }
+
+  const activeFilterCount = Object.values(activeFilters).filter(
+    (value) => value !== undefined
+  ).length;
+
   let network: Awaited<ReturnType<typeof getGlobalPpiProteinNeighbors>> | null =
     null;
   let loadError = false;
 
   try {
-    network = await getGlobalPpiProteinNeighbors(normalizedProteinId, limit);
+    network = await getGlobalPpiProteinNeighbors(
+      normalizedProteinId,
+      limit,
+      activeFilters
+    );
   } catch (error) {
     console.error(error);
     loadError = true;
@@ -150,6 +235,173 @@ export default async function GlobalPpiProteinNetworkPage({
             </div>
           </div>
 
+          <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+                  Backend Filters
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  These filters are sent to the FastAPI backend. The frontend only
+                  displays the filtered subgraph returned by the API.
+                </p>
+              </div>
+
+              {activeFilterCount > 0 && (
+                <a
+                  href={buildNetworkHref(limit, {
+                    source: undefined,
+                    protein_category: undefined,
+                    has_ddi: undefined,
+                    has_dmi: undefined,
+                    has_pdb: undefined,
+                  })}
+                  className="cursor-pointer rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                >
+                  Clear filters
+                </a>
+              )}
+            </div>
+
+            <div className="space-y-4 text-sm">
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Evidence source
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href={buildNetworkHref(limit, { source: undefined })}
+                    className={filterButtonClass(!activeFilters.source)}
+                  >
+                    All sources
+                  </a>
+
+                  {SOURCE_FILTER_OPTIONS.map((sourceOption) => (
+                    <a
+                      key={sourceOption}
+                      href={buildNetworkHref(limit, { source: sourceOption })}
+                      className={filterButtonClass(
+                        activeFilters.source === sourceOption
+                      )}
+                    >
+                      {sourceOption}
+                    </a>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Neighbor protein category
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href={buildNetworkHref(limit, {
+                      protein_category: undefined,
+                    })}
+                    className={filterButtonClass(!activeFilters.protein_category)}
+                  >
+                    All categories
+                  </a>
+
+                  {PROTEIN_CATEGORY_OPTIONS.map((categoryOption) => (
+                    <a
+                      key={categoryOption}
+                      href={buildNetworkHref(limit, {
+                        protein_category: categoryOption,
+                      })}
+                      className={filterButtonClass(
+                        activeFilters.protein_category === categoryOption
+                      )}
+                    >
+                      {categoryOption}
+                    </a>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    DDI
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={buildNetworkHref(limit, { has_ddi: undefined })}
+                      className={filterButtonClass(activeFilters.has_ddi === undefined)}
+                    >
+                      Any
+                    </a>
+                    <a
+                      href={buildNetworkHref(limit, { has_ddi: true })}
+                      className={filterButtonClass(activeFilters.has_ddi === true)}
+                    >
+                      DDI only
+                    </a>
+                    <a
+                      href={buildNetworkHref(limit, { has_ddi: false })}
+                      className={filterButtonClass(activeFilters.has_ddi === false)}
+                    >
+                      No DDI
+                    </a>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    DMI
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={buildNetworkHref(limit, { has_dmi: undefined })}
+                      className={filterButtonClass(activeFilters.has_dmi === undefined)}
+                    >
+                      Any
+                    </a>
+                    <a
+                      href={buildNetworkHref(limit, { has_dmi: true })}
+                      className={filterButtonClass(activeFilters.has_dmi === true)}
+                    >
+                      DMI only
+                    </a>
+                    <a
+                      href={buildNetworkHref(limit, { has_dmi: false })}
+                      className={filterButtonClass(activeFilters.has_dmi === false)}
+                    >
+                      No DMI
+                    </a>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Structural evidence
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={buildNetworkHref(limit, { has_pdb: undefined })}
+                      className={filterButtonClass(activeFilters.has_pdb === undefined)}
+                    >
+                      Any
+                    </a>
+                    <a
+                      href={buildNetworkHref(limit, { has_pdb: true })}
+                      className={filterButtonClass(activeFilters.has_pdb === true)}
+                    >
+                      PDB only
+                    </a>
+                    <a
+                      href={buildNetworkHref(limit, { has_pdb: false })}
+                      className={filterButtonClass(activeFilters.has_pdb === false)}
+                    >
+                      No PDB
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap gap-3 text-sm">
               <span className="rounded-full border border-yellow-700 px-3 py-1 text-yellow-300">
@@ -171,7 +423,7 @@ export default async function GlobalPpiProteinNetworkPage({
 
             <div className="flex flex-wrap gap-2">
               <Link
-                href={`/global-ppi/protein/${normalizedProteinId}/network?limit=20`}
+                href={buildNetworkHref(20)}
                 className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
                   limit === 20
                     ? "border-cyan-400 bg-cyan-500 text-slate-950"
@@ -182,7 +434,7 @@ export default async function GlobalPpiProteinNetworkPage({
               </Link>
 
               <Link
-                href={`/global-ppi/protein/${normalizedProteinId}/network?limit=50`}
+                href={buildNetworkHref(50)}
                 className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
                   limit === 50
                     ? "border-cyan-400 bg-cyan-500 text-slate-950"
@@ -193,7 +445,7 @@ export default async function GlobalPpiProteinNetworkPage({
               </Link>
 
               <Link
-                href={`/global-ppi/protein/${normalizedProteinId}/network?limit=200`}
+                href={buildNetworkHref(200)}
                 className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
                   isShowingAll
                     ? "border-cyan-400 bg-cyan-500 text-slate-950"

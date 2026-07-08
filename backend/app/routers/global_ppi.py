@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
@@ -155,14 +155,14 @@ def _global_ppi_legend() -> NetworkLegend:
         ],
     )
 
-def _matches_optional_bool(value: bool, expected: bool | None) -> bool:
+def _matches_optional_bool(value: bool, expected: Optional[bool]) -> bool:
     if expected is None:
         return True
 
     return value is expected
 
 
-def _normalize_filter_text(value: str | None) -> str | None:
+def _normalize_filter_text(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
 
@@ -174,7 +174,7 @@ def _normalize_filter_text(value: str | None) -> str | None:
     return text.lower()
 
 
-def _edge_matches_source(edge: VizEdge, source_filter: str | None) -> bool:
+def _edge_matches_source(edge: VizEdge, source_filter: Optional[str]) -> bool:
     normalized = _normalize_filter_text(source_filter)
 
     if normalized is None:
@@ -183,7 +183,7 @@ def _edge_matches_source(edge: VizEdge, source_filter: str | None) -> bool:
     return any(normalized in source.lower() for source in edge.evidenceSources)
 
 
-def _node_matches_category(node: VizNode, category_filter: str | None) -> bool:
+def _node_matches_category(node: VizNode, category_filter: Optional[str]) -> bool:
     normalized = _normalize_filter_text(category_filter)
 
     if normalized is None:
@@ -196,11 +196,11 @@ def _edge_passes_filters(
     *,
     edge: VizEdge,
     other_node: VizNode,
-    source: str | None,
-    protein_category: str | None,
-    has_ddi: bool | None,
-    has_dmi: bool | None,
-    has_pdb: bool | None,
+    source: Optional[str],
+    protein_category: Optional[str],
+    has_ddi: Optional[bool],
+    has_dmi: Optional[bool],
+    has_pdb: Optional[bool],
 ) -> bool:
     if not _edge_matches_source(edge, source):
         return False
@@ -300,11 +300,11 @@ def get_global_ppi_protein(uniprot_ac: str):
 def get_global_ppi_neighbors(
     uniprot_ac: str,
     limit: int = Query(default=20, ge=1, le=300),
-    source: str | None = Query(default=None),
-    protein_category: str | None = Query(default=None),
-    has_ddi: bool | None = Query(default=None),
-    has_dmi: bool | None = Query(default=None),
-    has_pdb: bool | None = Query(default=None),
+    source: Optional[str] = None,
+    protein_category: Optional[str] = None,
+    has_ddi: Optional[bool] = None,
+    has_dmi: Optional[bool] = None,
+    has_pdb: Optional[bool] = None,
 ):
     if not global_ppi_store.loaded:
         return JSONResponse(
