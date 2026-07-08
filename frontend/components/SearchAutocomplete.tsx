@@ -172,9 +172,6 @@ export default function SearchAutocomplete() {
 
   useEffect(() => {
     if (!canSearch) {
-      setResults([]);
-      setErrorMessage("");
-      setHasSearched(false);
       return;
     }
 
@@ -237,6 +234,17 @@ export default function SearchAutocomplete() {
     }
   }
 
+  function handleQueryChange(value: string) {
+    setQuery(value);
+
+    if (value.trim().length < 2) {
+      setResults([]);
+      setErrorMessage("");
+      setHasSearched(false);
+      setIsLoading(false);
+    }
+  }
+
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-950/80 p-6 shadow-xl">
       <div className="mb-4">
@@ -255,7 +263,7 @@ export default function SearchAutocomplete() {
       <div className="flex flex-col gap-3 sm:flex-row">
         <input
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => handleQueryChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               submitSearch();
