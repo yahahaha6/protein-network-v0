@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
@@ -11,9 +13,226 @@ from app.transform import (
     protein_node,
     edge,
 )
+from app.normalizers.evidence import normalize_evidence
+from app.normalizers.protein import normalize_protein_node
+from app.schemas.visualization import (
+    LegendItem,
+    NetworkLegend,
+    NetworkResponse,
+    NetworkStats,
+    PaginationInfo,
+    VizEdge,
+    VizNode,
+)
 
 
 router = APIRouter()
+
+
+def _protein_raw_for_normalizer(uniprot_ac: str, row: dict[str, Any]) -> dict[str, Any]:
+    """
+    Build a normalizer-friendly protein row while preserving the original raw row.
+
+    The existing local TSV sources use slightly different field names:
+    - gene_symbol / gene / ext_gene_name / gene_name
+    - protein_category / category
+    - protein_name / name / recommended_name
+
+    normalize_protein_node expects stable aliases such as uniprot_id,
+    gene_name, protein_name, and protein_category.
+    """
+
+    raw = dict(row)
+    raw["uniprot_id"] = uniprot_ac
+    raw["id"] = uniprot_ac
+    raw["gene_name"] = first_existing(
+        row,
+        ["gene_name", "gene_symbol", "gene", "ext_gene_name"],
+    )
+    raw["protein_name"] = first_existing(
+        row,
+        ["protein_name", "name", "recommended_name"],
+    )
+    raw["protein_category"] = first_existing(
+        row,
+        ["protein_category", "category"],
+    )
+    return raw
+
+
+def _fallback_protein_raw(uniprot_ac: str) -> dict[str, Any]:
+    return {
+        "id": uniprot_ac,
+        "uniprot_id": uniprot_ac,
+        "gene_name": uniprot_ac,
+        "protein_name": "",
+        "protein_category": "Unknown",
+    }
+
+
+def _protein_neighborhood_legend() -> NetworkLegend:
+    return NetworkLegend(
+        nodeCategories=[
+            LegendItem(
+                key="center",
+                label="Center protein",
+                description="The queried protein at the center of the neighborhood.",
+                color="yellow",
+            ),
+            LegendItem(
+                key="TF",
+                label="TF",
+                description="Transcription factor protein.",
+            ),
+            LegendItem(
+                key="EF",
+                label="EF",
+                description="Epigenetic factor protein.",
+            ),
+            LegendItem(
+                key="TF_and_EF",
+                label="TF and EF",
+                description="Protein annotated as both TF and EF.",
+            ),
+            LegendItem(
+                key="Unknown",
+                label="Unknown",
+                description="Protein category is unavailable or unknown.",
+            ),
+        ],
+        edgeEvidence=[
+            LegendItem(
+                key="high",
+                label="High evidence",
+                description="Structural evidence, or DDI/DMI with publication support.",
+                lineStyle="solid",
+            ),
+            LegendItem(
+                key="medium",
+                label="Medium evidence",
+                description="Multiple sources, multiple publications, or multiple gold records.",
+                lineStyle="solid",
+            ),
+            LegendItem(
+                key="low",
+                label="Low evidence",
+                description="At least one source, method, or publication exists.",
+                lineStyle="solid",
+            ),
+            LegendItem(
+                key="unknown",
+                label="Unknown evidence",
+                description="No usable evidence fields are available.",
+                lineStyle="dotted",
+            ),
+        ],
+        badges=[
+            LegendItem(
+                key="DDI",
+                label="DDI",
+                description="Domain-domain interaction evidence exists.",
+            ),
+            LegendItem(
+                key="DMI",
+                label="DMI",
+                description="Domain-motif interaction evidence exists.",
+            ),
+            LegendItem(
+                key="PDB",
+                label="PDB",
+                description="Supporting structural evidence exists.",
+            ),
+        ],
+    )
+
+
+def _make_protein_network_stats(nodes: list[VizNode], edges: list[VizEdge]) -> NetworkStats:
+    return NetworkStats(
+        nodeCount=len(nodes),
+        edgeCount=len(edges),
+        proteinNodeCount=sum(1 for node in nodes if node.type == "protein"),
+        complexNodeCount=sum(1 for node in nodes if node.type == "complex"),
+        tfCount=sum(1 for node in nodes if node.proteinCategory == "TF"),
+        efCount=sum(1 for node in nodes if node.proteinCategory == "EF"),
+        tfAndEfCount=sum(1 for node in nodes if node.proteinCategory == "TF_and_EF"),
+        unknownCategoryCount=sum(
+            1 for node in nodes if node.proteinCategory == "Unknown"
+        ),
+        ddiSupportedEdgeCount=sum(1 for edge in edges if edge.hasDDI),
+        dmiSupportedEdgeCount=sum(1 for edge in edges if edge.hasDMI),
+        structuralEvidenceEdgeCount=sum(
+            1 for edge in edges if edge.hasStructuralEvidence
+        ),
+        confirmedPpiEdgeCount=sum(1 for edge in edges if edge.isConfirmedPpi),
+        coComplexOnlyEdgeCount=sum(1 for edge in edges if edge.isCoComplexOnly),
+        highEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "high"),
+        mediumEvidenceEdgeCount=sum(
+            1 for edge in edges if edge.evidenceLevel == "medium"
+        ),
+        lowEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "low"),
+        unknownEvidenceEdgeCount=sum(
+            1 for edge in edges if edge.evidenceLevel == "unknown"
+        ),
+    )
+
+
+def _make_protein_neighbor_edge(
+    *,
+    row: dict[str, Any],
+    source_id: str,
+    target_id: str,
+) -> VizEdge:
+    ddi_value = first_existing(row, ["ddi", "DDI", "ddi_annotations"])
+    dmi_value = first_existing(row, ["dmi", "DMI", "dmi_annotations"])
+
+    evidence_raw = dict(row)
+    evidence_raw.update(
+        {
+            "sources": split_list(first_existing(row, ["sources", "source_dbs"])),
+            "methods": split_list(
+                first_existing(row, ["methods", "experimental_methods"])
+            ),
+            "publications": split_list(
+                first_existing(row, ["publications", "pmids", "pmid"])
+            ),
+            "supporting_structures": split_list(
+                first_existing(
+                    row,
+                    ["supporting_structures", "pdb_ids", "structures"],
+                )
+            ),
+            "n_ddi": first_existing(row, ["n_ddi", "ddi_count"]),
+            "n_dmi": first_existing(row, ["n_dmi", "dmi_count"]),
+            "ddi": split_list(ddi_value),
+            "dmi": split_list(dmi_value),
+        }
+    )
+
+    evidence = normalize_evidence(
+        evidence_raw,
+        is_confirmed_ppi=True,
+        is_co_complex_only=False,
+    )
+
+    edge_raw = dict(row)
+    edge_raw.update(
+        {
+            "protein1": source_id,
+            "protein2": target_id,
+            "gene1": first_existing(row, ["gene1", "protein1_gene", "source_gene"]),
+            "gene2": first_existing(row, ["gene2", "protein2_gene", "target_gene"]),
+        }
+    )
+
+    return VizEdge(
+        id=f"DIRECT_PPI|{source_id}|{target_id}",
+        source=source_id,
+        target=target_id,
+        type="ppi",
+        label="PPI",
+        raw=edge_raw,
+        **evidence,
+    )
 
 
 @router.get("/protein/{uniprot_ac}")
@@ -109,7 +328,6 @@ def get_protein_neighbors(
         )
 
     df = store.ppi_edges
-
     source_col, target_col = detect_ppi_pair_cols(df)
 
     sub = df[
@@ -120,17 +338,18 @@ def get_protein_neighbors(
     total = len(sub)
     page = sub.head(limit)
 
-    nodes = {}
-    edges = []
-
-    nodes[protein_key(uniprot_ac)] = protein_node(
-        uniprot_ac,
-        center_row,
-        node_type="CenterProtein",
+    center_node = normalize_protein_node(
+        _protein_raw_for_normalizer(uniprot_ac, center_row),
+        is_center=True,
     )
 
-    for _, row in page.iterrows():
-        row = row.to_dict()
+    nodes_by_id: dict[str, VizNode] = {
+        center_node.id: center_node,
+    }
+    viz_edges: list[VizEdge] = []
+
+    for _, raw_row in page.iterrows():
+        row = raw_row.to_dict()
 
         protein_a = clean(row.get(source_col))
         protein_b = clean(row.get(target_col))
@@ -139,73 +358,47 @@ def get_protein_neighbors(
             continue
 
         other = protein_b if protein_a == uniprot_ac else protein_a
+        other_row = find_protein_row(other) or _fallback_protein_raw(other)
 
-        other_row = find_protein_row(other) or {}
-
-        nodes[protein_key(other)] = protein_node(
-            other,
-            other_row,
-            node_type="NeighborProtein",
+        other_node = normalize_protein_node(
+            _protein_raw_for_normalizer(other, other_row),
+            is_center=False,
         )
 
-        source_id = protein_key(protein_a)
-        target_id = protein_key(protein_b)
+        nodes_by_id[other_node.id] = other_node
 
-        ddi_value = first_existing(row, ["ddi", "DDI", "ddi_annotations"])
-        dmi_value = first_existing(row, ["dmi", "DMI", "dmi_annotations"])
-
-        edges.append(
-            edge(
-                edge_id=f"DIRECT_PPI|{source_id}|{target_id}",
-                source=source_id,
-                target=target_id,
-                edge_type="DIRECT_PPI",
-                extra={
-                    "protein1": protein_a,
-                    "protein2": protein_b,
-                    "gene1": first_existing(row, ["gene1", "protein1_gene", "source_gene"]),
-                    "gene2": first_existing(row, ["gene2", "protein2_gene", "target_gene"]),
-                    "sources": split_list(first_existing(row, ["sources", "source_dbs"])),
-                    "methods": split_list(first_existing(row, ["methods", "experimental_methods"])),
-                    "publications": split_list(first_existing(row, ["publications", "pmids", "pmid"])),
-                    "supportingStructures": split_list(
-                        first_existing(row, ["supporting_structures", "pdb_ids", "structures"])
-                    ),
-                    "nDdi": first_existing(row, ["n_ddi", "ddi_count"]),
-                    "nDmi": first_existing(row, ["n_dmi", "dmi_count"]),
-                    "hasDdi": ddi_value != "暂无数据",
-                    "hasDmi": dmi_value != "暂无数据",
-                    "ddi": split_list(ddi_value),
-                    "dmi": split_list(dmi_value),
-                },
+        viz_edges.append(
+            _make_protein_neighbor_edge(
+                row=row,
+                source_id=protein_a,
+                target_id=protein_b,
             )
         )
 
-    center_gene = first_existing(center_row, ["gene_symbol", "gene", "ext_gene_name", "gene_name"])
+    viz_nodes = list(nodes_by_id.values())
 
-    return {
-        "center": {
-            "id": protein_key(uniprot_ac),
-            "uniprotAc": uniprot_ac,
-            "label": center_gene if center_gene != "暂无数据" else uniprot_ac,
-            "type": "CenterProtein",
-        },
-        "nodes": list(nodes.values()),
-        "edges": edges,
-        "pagination": {
+    response = NetworkResponse(
+        graphType="protein_neighborhood",
+        center=center_node,
+        nodes=viz_nodes,
+        edges=viz_edges,
+        stats=_make_protein_network_stats(viz_nodes, viz_edges),
+        legend=_protein_neighborhood_legend(),
+        pagination=PaginationInfo(
+            limit=limit,
+            offset=0,
+            total=total,
+            hasMore=len(viz_edges) < total,
+        ),
+        filters={
             "limit": limit,
-            "offset": 0,
-            "total": total,
-            "returned": len(edges),
-            "nextOffset": limit if limit < total else None,
         },
-        "stats": {
-            "nodeCount": len(nodes),
-            "edgeCount": len(edges),
-        },
-        "truncated": limit < total,
-    }
+        warnings=[
+            "This endpoint now returns the standard NetworkResponse model. Frontend code should use normalized node and edge fields instead of raw Cytoscape element data."
+        ],
+    )
 
+    return response.model_dump(mode="json")
 
 def find_protein_row(uniprot_ac: str):
     return (
