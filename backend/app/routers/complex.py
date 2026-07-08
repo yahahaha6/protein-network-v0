@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
@@ -191,6 +191,41 @@ def _make_complex_intra_stats(nodes: list[VizNode], edges: list[VizEdge]) -> Net
     )
 
 
+
+def _matches_optional_bool(value: bool, expected: Optional[bool]) -> bool:
+    if expected is None:
+        return True
+
+    return value is expected
+
+
+def _complex_intra_edge_passes_filters(
+    *,
+    edge: VizEdge,
+    confirmed_ppi: Optional[bool],
+    co_complex_only: Optional[bool],
+    has_ddi: Optional[bool],
+    has_dmi: Optional[bool],
+    has_pdb: Optional[bool],
+) -> bool:
+    if not _matches_optional_bool(edge.isConfirmedPpi, confirmed_ppi):
+        return False
+
+    if not _matches_optional_bool(edge.isCoComplexOnly, co_complex_only):
+        return False
+
+    if not _matches_optional_bool(edge.hasDDI, has_ddi):
+        return False
+
+    if not _matches_optional_bool(edge.hasDMI, has_dmi):
+        return False
+
+    if not _matches_optional_bool(edge.hasStructuralEvidence, has_pdb):
+        return False
+
+    return True
+
+
 def _make_complex_intra_edge(
     *,
     complex_id: str,
@@ -335,7 +370,14 @@ def get_complex(complex_id: str):
 
 
 @router.get("/complex/{complex_id}/intra")
-def get_complex_intra(complex_id: str):
+def get_complex_intra(
+    complex_id: str,
+    confirmed_ppi: Optional[bool] = None,
+    co_complex_only: Optional[bool] = None,
+    has_ddi: Optional[bool] = None,
+    has_dmi: Optional[bool] = None,
+    has_pdb: Optional[bool] = None,
+):
     complex_row = store.complex_by_id.get(complex_id)
 
     if complex_row is None:
@@ -398,9 +440,6 @@ def get_complex_intra(complex_id: str):
             is_center=False,
         )
 
-        nodes_by_id[source_node.id] = source_node
-        nodes_by_id[target_node.id] = target_node
-
         is_confirmed_ppi = bool_value(
             first_existing(
                 row,
@@ -413,15 +452,27 @@ def get_complex_intra(complex_id: str):
             )
         )
 
-        viz_edges.append(
-            _make_complex_intra_edge(
-                complex_id=complex_id,
-                row=row,
-                source_id=source_uniprot,
-                target_id=target_uniprot,
-                is_confirmed_ppi=is_confirmed_ppi,
-            )
+        viz_edge = _make_complex_intra_edge(
+            complex_id=complex_id,
+            row=row,
+            source_id=source_uniprot,
+            target_id=target_uniprot,
+            is_confirmed_ppi=is_confirmed_ppi,
         )
+
+        if not _complex_intra_edge_passes_filters(
+            edge=viz_edge,
+            confirmed_ppi=confirmed_ppi,
+            co_complex_only=co_complex_only,
+            has_ddi=has_ddi,
+            has_dmi=has_dmi,
+            has_pdb=has_pdb,
+        ):
+            continue
+
+        nodes_by_id[source_node.id] = source_node
+        nodes_by_id[target_node.id] = target_node
+        viz_edges.append(viz_edge)
 
     viz_nodes = list(nodes_by_id.values())
 
@@ -433,7 +484,13 @@ def get_complex_intra(complex_id: str):
         stats=_make_complex_intra_stats(viz_nodes, viz_edges),
         legend=_complex_intra_legend(),
         pagination=None,
-        filters={},
+        filters={
+            "confirmed_ppi": confirmed_ppi,
+            "co_complex_only": co_complex_only,
+            "has_ddi": has_ddi,
+            "has_dmi": has_dmi,
+            "has_pdb": has_pdb,
+        },
         warnings=[
             "This endpoint now returns the standard NetworkResponse model. Complex intra edges distinguish confirmed direct PPI from co-complex-only relationships via isConfirmedPpi and isCoComplexOnly."
         ],
