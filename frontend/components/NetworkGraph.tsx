@@ -5,6 +5,7 @@ import type { Core, EdgeSingular, ElementDefinition, LayoutOptions, NodeSingular
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import DetailFields from "./DetailFields";
+import ExpressionProfileCard from "./ExpressionProfileCard";
 import NetworkAttributeTable from "./NetworkAttributeTable";
 
 type DetailRecord = Record<string, unknown>;
@@ -1597,6 +1598,14 @@ export default function NetworkGraph({
 </button>
               )}
             </div>
+
+            {selectedNodeData.hpaProfile &&
+              typeof selectedNodeData.hpaProfile === "object" && (
+                <ExpressionProfileCard
+                  data={selectedNodeData.hpaProfile as Record<string, unknown>}
+                  compact
+                />
+              )}
 
             <DetailFields title="Node Fields" data={selectedNodeData} />
           </div>
