@@ -53,16 +53,36 @@ type StandardVizEdge = {
   raw?: DetailRecord;
 };
 
+type LegacyNetworkNode = {
+  data?: DetailRecord;
+  id?: string;
+  label?: string;
+  type?: string;
+  [key: string]: unknown;
+};
+
+type LegacyNetworkEdge = {
+  data?: DetailRecord;
+  id?: string;
+  source?: string;
+  target?: string;
+  type?: string;
+  [key: string]: unknown;
+};
+
 type StandardNetworkResponse = {
   graphType?: string;
-  center?: StandardVizNode | null;
-  nodes: StandardVizNode[];
-  edges: StandardVizEdge[];
+  center?: StandardVizNode | LegacyNetworkNode | null;
+  nodes: Array<StandardVizNode | LegacyNetworkNode | ElementDefinition>;
+  edges: Array<StandardVizEdge | LegacyNetworkEdge | ElementDefinition>;
   stats?: unknown;
   legend?: unknown;
   pagination?: unknown;
   filters?: unknown;
   warnings?: string[];
+  total?: number;
+  total_edges?: number;
+  truncated?: boolean;
 };
 
 type NetworkGraphInput = NetworkElements | StandardNetworkResponse;
@@ -134,8 +154,28 @@ function isCytoscapeElementInput(
   return (
     Array.isArray(elements.nodes) &&
     Array.isArray(elements.edges) &&
-    elements.nodes.every((node) => "data" in node)
+    elements.nodes.every(
+      (node) =>
+        typeof node === "object" &&
+        node !== null &&
+        "data" in node &&
+        !("graphType" in node)
+    )
   );
+}
+
+function getElementData(item: StandardVizNode | StandardVizEdge | LegacyNetworkNode | LegacyNetworkEdge | ElementDefinition) {
+  if (
+    typeof item === "object" &&
+    item !== null &&
+    "data" in item &&
+    item.data &&
+    typeof item.data === "object"
+  ) {
+    return item.data as DetailRecord;
+  }
+
+  return item as DetailRecord;
 }
 
 function standardNodeTypeForCytoscape(node: StandardVizNode) {
@@ -163,54 +203,106 @@ function toNetworkElements(elements: NetworkGraphInput): NetworkElements {
 
   return {
     nodes: elements.nodes.map((node) => {
-      const nodeType = standardNodeTypeForCytoscape(node);
+      const data = getElementData(node);
+      const normalizedNode = data as unknown as StandardVizNode;
+      const nodeType = standardNodeTypeForCytoscape(normalizedNode);
 
       return {
         data: {
-          id: node.id,
-          label: node.label || node.id,
+          ...data,
+          id: String(normalizedNode.id || data.id || ""),
+          label: String(normalizedNode.label || data.label || normalizedNode.id || data.id || ""),
           type: nodeType,
-          nodeType: node.type,
-          displayName: node.displayName,
-          category: node.proteinCategory || "Unknown",
-          proteinCategory: node.proteinCategory || "Unknown",
-          badges: node.badges ?? [],
-          hpaProfile: node.hpaProfile,
-          externalLinks: node.externalLinks ?? [],
-          complexIds: node.complexIds ?? [],
-          complexNames: node.complexNames ?? [],
-          raw: node.raw ?? {},
+          nodeType: normalizedNode.type || data.nodeType,
+          displayName: normalizedNode.displayName || data.displayName,
+          category:
+            normalizedNode.proteinCategory ||
+            String(data.proteinCategory || data.category || "Unknown"),
+          proteinCategory:
+            normalizedNode.proteinCategory ||
+            String(data.proteinCategory || data.category || "Unknown"),
+          badges: normalizedNode.badges ?? data.badges ?? [],
+          hpaProfile: normalizedNode.hpaProfile ?? data.hpaProfile,
+          externalLinks: normalizedNode.externalLinks ?? data.externalLinks ?? [],
+          complexIds: normalizedNode.complexIds ?? data.complexIds ?? [],
+          complexNames: normalizedNode.complexNames ?? data.complexNames ?? [],
+          raw: normalizedNode.raw ?? data.raw ?? {},
         },
       };
     }),
     edges: elements.edges.map((edge) => {
+      const data = getElementData(edge);
+      const normalizedEdge = data as unknown as StandardVizEdge;
+
       return {
         data: {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          type: edge.type || "ppi",
-          relationshipType: edge.type || "ppi",
-          label: edge.label || edge.type || "ppi",
-          evidenceSources: edge.evidenceSources ?? [],
-          sources: edge.evidenceSources ?? [],
-          hpaDatasets: edge.hpaDatasets ?? [],
-          hpa_datasets: edge.hpaDatasets ?? [],
-          methods: edge.methods ?? [],
-          publications: edge.publications ?? [],
-          supportingStructures: edge.supportingStructures ?? [],
-          supporting_structures: edge.supportingStructures ?? [],
-          ddi: edge.ddi ?? [],
-          dmi: edge.dmi ?? [],
-          hasDDI: Boolean(edge.hasDDI),
-          hasDMI: Boolean(edge.hasDMI),
-          hasStructuralEvidence: Boolean(edge.hasStructuralEvidence),
-          isConfirmedPpi: Boolean(edge.isConfirmedPpi),
-          isCoComplexOnly: Boolean(edge.isCoComplexOnly),
-          evidenceLevel: edge.evidenceLevel || "unknown",
-          evidenceSummary: edge.evidenceSummary,
-          externalLinks: edge.externalLinks ?? [],
-          raw: edge.raw ?? {},
+          ...data,
+          id: String(normalizedEdge.id || data.id || `${data.source || ""}-${data.target || ""}`),
+          source: String(normalizedEdge.source || data.source || ""),
+          target: String(normalizedEdge.target || data.target || ""),
+          type: normalizedEdge.type || String(data.type || "ppi"),
+          relationshipType:
+            normalizedEdge.type ||
+            String(data.relationshipType || data.type || "ppi"),
+          label:
+            normalizedEdge.label ||
+            String(data.label || data.relationshipType || data.type || "ppi"),
+          evidenceSources:
+            normalizedEdge.evidenceSources ??
+            (data.evidenceSources as string[] | undefined) ??
+            (data.sources as string[] | undefined) ??
+            [],
+          sources:
+            normalizedEdge.evidenceSources ??
+            (data.evidenceSources as string[] | undefined) ??
+            (data.sources as string[] | undefined) ??
+            [],
+          hpaDatasets:
+            normalizedEdge.hpaDatasets ??
+            (data.hpaDatasets as string[] | undefined) ??
+            (data.hpa_datasets as string[] | undefined) ??
+            [],
+          hpa_datasets:
+            normalizedEdge.hpaDatasets ??
+            (data.hpaDatasets as string[] | undefined) ??
+            (data.hpa_datasets as string[] | undefined) ??
+            [],
+          methods: normalizedEdge.methods ?? (data.methods as string[] | undefined) ?? [],
+          publications:
+            normalizedEdge.publications ??
+            (data.publications as string[] | undefined) ??
+            [],
+          supportingStructures:
+            normalizedEdge.supportingStructures ??
+            (data.supportingStructures as string[] | undefined) ??
+            (data.supporting_structures as string[] | undefined) ??
+            [],
+          supporting_structures:
+            normalizedEdge.supportingStructures ??
+            (data.supportingStructures as string[] | undefined) ??
+            (data.supporting_structures as string[] | undefined) ??
+            [],
+          ddi: normalizedEdge.ddi ?? (data.ddi as string[] | undefined) ?? [],
+          dmi: normalizedEdge.dmi ?? (data.dmi as string[] | undefined) ?? [],
+          hasDDI: Boolean(normalizedEdge.hasDDI ?? data.hasDDI),
+          hasDMI: Boolean(normalizedEdge.hasDMI ?? data.hasDMI),
+          hasStructuralEvidence: Boolean(
+            normalizedEdge.hasStructuralEvidence ?? data.hasStructuralEvidence
+          ),
+          isConfirmedPpi: Boolean(
+            normalizedEdge.isConfirmedPpi ?? data.isConfirmedPpi
+          ),
+          isCoComplexOnly: Boolean(
+            normalizedEdge.isCoComplexOnly ?? data.isCoComplexOnly
+          ),
+          evidenceLevel:
+            normalizedEdge.evidenceLevel || String(data.evidenceLevel || "unknown"),
+          evidenceSummary: normalizedEdge.evidenceSummary ?? data.evidenceSummary,
+          externalLinks:
+            normalizedEdge.externalLinks ??
+            (data.externalLinks as unknown[] | undefined) ??
+            [],
+          raw: normalizedEdge.raw ?? data.raw ?? {},
         },
       };
     }),
