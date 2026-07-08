@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
@@ -14,9 +16,250 @@ from app.transform import (
     protein_node,
     edge,
 )
+from app.normalizers.evidence import normalize_evidence
+from app.normalizers.protein import normalize_protein_node
+from app.schemas.visualization import (
+    LegendItem,
+    NetworkLegend,
+    NetworkResponse,
+    NetworkStats,
+    VizEdge,
+    VizNode,
+)
 
 
 router = APIRouter()
+
+
+def _protein_raw_for_normalizer(uniprot_ac: str, row: dict[str, Any]) -> dict[str, Any]:
+    """Build a normalizer-friendly protein row from mixed local TSV sources."""
+
+    raw = dict(row)
+    raw["uniprot_id"] = uniprot_ac
+    raw["id"] = uniprot_ac
+    raw["gene_name"] = first_existing(
+        row,
+        ["gene_name", "gene_symbol", "gene", "ext_gene_name"],
+    )
+    raw["protein_name"] = first_existing(
+        row,
+        ["protein_name", "name", "recommended_name"],
+    )
+    raw["protein_category"] = first_existing(
+        row,
+        ["protein_category", "category"],
+    )
+    return raw
+
+
+def _fallback_protein_raw(uniprot_ac: str) -> dict[str, Any]:
+    return {
+        "id": uniprot_ac,
+        "uniprot_id": uniprot_ac,
+        "gene_name": uniprot_ac,
+        "protein_name": "",
+        "protein_category": "Unknown",
+    }
+
+
+def _complex_center_node(complex_id: str, row: dict[str, Any]) -> VizNode:
+    complex_name = first_existing(row, ["name", "complex_name"])
+    label = complex_name if complex_name != "暂无数据" else complex_id
+
+    subunit_ids = split_list(
+        first_existing(row, ["subunit_ids", "subunit_uniprot_ids", "subunits"])
+    )
+
+    return VizNode(
+        id=complex_key(complex_id),
+        label=label,
+        type="complex",
+        displayName=f"{label} / CORUM:{complex_id}",
+        subunitCount=len(subunit_ids) if subunit_ids else None,
+        raw=dict(row),
+    )
+
+
+def _complex_intra_legend() -> NetworkLegend:
+    return NetworkLegend(
+        nodeCategories=[
+            LegendItem(
+                key="protein",
+                label="Subunit protein",
+                description="Protein subunit participating in this complex intra network.",
+            ),
+            LegendItem(
+                key="TF",
+                label="TF",
+                description="Transcription factor protein.",
+            ),
+            LegendItem(
+                key="EF",
+                label="EF",
+                description="Epigenetic factor protein.",
+            ),
+            LegendItem(
+                key="TF_and_EF",
+                label="TF and EF",
+                description="Protein annotated as both TF and EF.",
+            ),
+            LegendItem(
+                key="Unknown",
+                label="Unknown",
+                description="Protein category is unavailable or unknown.",
+            ),
+        ],
+        edgeEvidence=[
+            LegendItem(
+                key="confirmed_ppi",
+                label="Confirmed direct PPI",
+                description="Two subunits share direct PPI evidence in the PPI graph.",
+                lineStyle="solid",
+            ),
+            LegendItem(
+                key="co_complex_only",
+                label="Co-complex only",
+                description="Two proteins are observed in the same complex, but no direct PPI evidence is available in the current data.",
+                lineStyle="dotted",
+            ),
+            LegendItem(
+                key="high",
+                label="High evidence",
+                description="Structural evidence, or DDI/DMI with publication support.",
+                lineStyle="solid",
+            ),
+            LegendItem(
+                key="medium",
+                label="Medium evidence",
+                description="Multiple sources, multiple publications, or multiple gold records.",
+                lineStyle="solid",
+            ),
+            LegendItem(
+                key="low",
+                label="Low evidence",
+                description="At least one source, method, or publication exists.",
+                lineStyle="solid",
+            ),
+        ],
+        badges=[
+            LegendItem(
+                key="DDI",
+                label="DDI",
+                description="Domain-domain interaction evidence exists.",
+            ),
+            LegendItem(
+                key="DMI",
+                label="DMI",
+                description="Domain-motif interaction evidence exists.",
+            ),
+            LegendItem(
+                key="PDB",
+                label="PDB",
+                description="Supporting structural evidence exists.",
+            ),
+        ],
+    )
+
+
+def _make_complex_intra_stats(nodes: list[VizNode], edges: list[VizEdge]) -> NetworkStats:
+    return NetworkStats(
+        nodeCount=len(nodes),
+        edgeCount=len(edges),
+        proteinNodeCount=sum(1 for node in nodes if node.type == "protein"),
+        complexNodeCount=sum(1 for node in nodes if node.type == "complex"),
+        tfCount=sum(1 for node in nodes if node.proteinCategory == "TF"),
+        efCount=sum(1 for node in nodes if node.proteinCategory == "EF"),
+        tfAndEfCount=sum(1 for node in nodes if node.proteinCategory == "TF_and_EF"),
+        unknownCategoryCount=sum(
+            1 for node in nodes if node.proteinCategory == "Unknown"
+        ),
+        ddiSupportedEdgeCount=sum(1 for edge in edges if edge.hasDDI),
+        dmiSupportedEdgeCount=sum(1 for edge in edges if edge.hasDMI),
+        structuralEvidenceEdgeCount=sum(
+            1 for edge in edges if edge.hasStructuralEvidence
+        ),
+        confirmedPpiEdgeCount=sum(1 for edge in edges if edge.isConfirmedPpi),
+        coComplexOnlyEdgeCount=sum(1 for edge in edges if edge.isCoComplexOnly),
+        highEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "high"),
+        mediumEvidenceEdgeCount=sum(
+            1 for edge in edges if edge.evidenceLevel == "medium"
+        ),
+        lowEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "low"),
+        unknownEvidenceEdgeCount=sum(
+            1 for edge in edges if edge.evidenceLevel == "unknown"
+        ),
+    )
+
+
+def _make_complex_intra_edge(
+    *,
+    complex_id: str,
+    row: dict[str, Any],
+    source_id: str,
+    target_id: str,
+    is_confirmed_ppi: bool,
+) -> VizEdge:
+    edge_kind = "confirmed_ppi" if is_confirmed_ppi else "co_complex_only"
+    label = "Confirmed PPI" if is_confirmed_ppi else "Co-complex only"
+
+    evidence_raw = dict(row)
+    evidence_raw.update(
+        {
+            "evidence_in_ppi_graph": is_confirmed_ppi,
+            "sources": split_list(first_existing(row, ["sources", "source_dbs"])),
+            "methods": split_list(
+                first_existing(row, ["methods", "experimental_methods"])
+            ),
+            "publications": split_list(
+                first_existing(row, ["publications", "pmids", "pmid"])
+            ),
+            "supporting_structures": split_list(
+                first_existing(
+                    row,
+                    ["supporting_structures", "pdb_ids", "structures"],
+                )
+            ),
+            "n_ddi": first_existing(row, ["n_ddi", "ddi_count"]),
+            "n_dmi": first_existing(row, ["n_dmi", "dmi_count"]),
+            "ddi": split_list(first_existing(row, ["ddi", "DDI", "ddi_annotations"])),
+            "dmi": split_list(first_existing(row, ["dmi", "DMI", "dmi_annotations"])),
+        }
+    )
+
+    evidence = normalize_evidence(
+        evidence_raw,
+        is_confirmed_ppi=is_confirmed_ppi,
+        is_co_complex_only=not is_confirmed_ppi,
+    )
+
+    edge_raw = dict(row)
+    edge_raw.update(
+        {
+            "complexId": complex_id,
+            "evidenceInPpiGraph": is_confirmed_ppi,
+            "evidenceLabel": (
+                "已获直接 PPI 证据确认"
+                if is_confirmed_ppi
+                else "仅共存于同一复合物，暂无直接 PPI 证据"
+            ),
+            "sharedComplexCount": first_existing(
+                row,
+                ["shared_complex_count", "n_shared_complexes", "n_complexes_shared"],
+            ),
+            "normalizedRelationshipKind": edge_kind,
+        }
+    )
+
+    return VizEdge(
+        id=f"COMPLEX_INTRA|{edge_kind}|{complex_id}|{source_id}|{target_id}",
+        source=source_id,
+        target=target_id,
+        type="complex_intra_ppi",
+        label=label,
+        raw=edge_raw,
+        **evidence,
+    )
+
 
 
 @router.get("/complex/{complex_id}")
@@ -118,14 +361,13 @@ def get_complex_intra(complex_id: str):
     else:
         sub = df[df[complex_col].astype(str) == complex_id]
 
-    nodes = {}
-    edges = []
+    center_node = _complex_center_node(complex_id, complex_row)
 
-    confirmed_count = 0
-    co_complex_only_count = 0
+    nodes_by_id: dict[str, VizNode] = {}
+    viz_edges: list[VizEdge] = []
 
-    for _, row in sub.iterrows():
-        row = row.to_dict()
+    for _, raw_row in sub.iterrows():
+        row = raw_row.to_dict()
 
         source_uniprot = clean(row.get(source_col))
         target_uniprot = clean(row.get(target_col))
@@ -137,32 +379,29 @@ def get_complex_intra(complex_id: str):
             store.ppi_protein_by_uniprot.get(source_uniprot)
             or store.intra_protein_by_uniprot.get(source_uniprot)
             or store.ext_protein_by_uniprot.get(source_uniprot)
-            or {}
+            or _fallback_protein_raw(source_uniprot)
         )
 
         target_row = (
             store.ppi_protein_by_uniprot.get(target_uniprot)
             or store.intra_protein_by_uniprot.get(target_uniprot)
             or store.ext_protein_by_uniprot.get(target_uniprot)
-            or {}
+            or _fallback_protein_raw(target_uniprot)
         )
 
-        source_id = protein_key(source_uniprot)
-        target_id = protein_key(target_uniprot)
-
-        nodes[source_id] = protein_node(
-            source_uniprot,
-            source_row,
-            node_type="SubunitProtein",
+        source_node = normalize_protein_node(
+            _protein_raw_for_normalizer(source_uniprot, source_row),
+            is_center=False,
+        )
+        target_node = normalize_protein_node(
+            _protein_raw_for_normalizer(target_uniprot, target_row),
+            is_center=False,
         )
 
-        nodes[target_id] = protein_node(
-            target_uniprot,
-            target_row,
-            node_type="SubunitProtein",
-        )
+        nodes_by_id[source_node.id] = source_node
+        nodes_by_id[target_node.id] = target_node
 
-        evidence = bool_value(
+        is_confirmed_ppi = bool_value(
             first_existing(
                 row,
                 [
@@ -174,56 +413,33 @@ def get_complex_intra(complex_id: str):
             )
         )
 
-        if evidence:
-            confirmed_count += 1
-            edge_type = "INTRA_PAIR_CONFIRMED"
-            evidence_label = "已获直接 PPI 证据确认"
-        else:
-            co_complex_only_count += 1
-            edge_type = "CO_COMPLEX_ONLY"
-            evidence_label = "仅共存于同一复合物，暂无直接 PPI 证据"
-
-        edges.append(
-            edge(
-                edge_id=f"{edge_type}|{complex_key(complex_id)}|{source_id}|{target_id}",
-                source=source_id,
-                target=target_id,
-                edge_type=edge_type,
-                extra={
-                    "complexId": complex_id,
-                    "evidenceInPpiGraph": evidence,
-                    "evidenceLabel": evidence_label,
-                    "sources": split_list(first_existing(row, ["sources", "source_dbs"])),
-                    "methods": split_list(first_existing(row, ["methods", "experimental_methods"])),
-                    "publications": split_list(first_existing(row, ["publications", "pmids", "pmid"])),
-                    "supportingStructures": split_list(
-                        first_existing(row, ["supporting_structures", "pdb_ids", "structures"])
-                    ),
-                    "sharedComplexCount": first_existing(
-    row,
-    ["shared_complex_count", "n_shared_complexes", "n_complexes_shared"],
-),
-                    "ddi": split_list(first_existing(row, ["ddi", "DDI", "ddi_annotations"])),
-                    "dmi": split_list(first_existing(row, ["dmi", "DMI", "dmi_annotations"])),
-                },
+        viz_edges.append(
+            _make_complex_intra_edge(
+                complex_id=complex_id,
+                row=row,
+                source_id=source_uniprot,
+                target_id=target_uniprot,
+                is_confirmed_ppi=is_confirmed_ppi,
             )
         )
 
-    return {
-        "complex": {
-            "id": complex_id,
-            "key": complex_key(complex_id),
-            "label": first_existing(complex_row, ["name", "complex_name"]),
-        },
-        "nodes": list(nodes.values()),
-        "edges": edges,
-        "stats": {
-            "nodeCount": len(nodes),
-            "edgeCount": len(edges),
-            "confirmedEdgeCount": confirmed_count,
-            "coComplexOnlyEdgeCount": co_complex_only_count,
-        },
-    }
+    viz_nodes = list(nodes_by_id.values())
+
+    response = NetworkResponse(
+        graphType="complex_intra",
+        center=center_node,
+        nodes=viz_nodes,
+        edges=viz_edges,
+        stats=_make_complex_intra_stats(viz_nodes, viz_edges),
+        legend=_complex_intra_legend(),
+        pagination=None,
+        filters={},
+        warnings=[
+            "This endpoint now returns the standard NetworkResponse model. Complex intra edges distinguish confirmed direct PPI from co-complex-only relationships via isConfirmedPpi and isCoComplexOnly."
+        ],
+    )
+
+    return response.model_dump(mode="json")
 
 
 @router.get("/complex/{complex_id}/ext")
