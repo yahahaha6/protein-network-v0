@@ -23,6 +23,7 @@ from app.schemas.visualization import (
     NetworkLegend,
     NetworkResponse,
     NetworkStats,
+    PaginationInfo,
     VizEdge,
     VizNode,
 )
@@ -499,6 +500,143 @@ def get_complex_intra(
     return response.model_dump(mode="json")
 
 
+def _complex_ext_legend() -> NetworkLegend:
+    return NetworkLegend(
+        nodeTypes=[
+            LegendItem(
+                key="complex",
+                label="Center complex",
+                description="The CORUM complex used as the source of external PPI relationships.",
+            ),
+            LegendItem(
+                key="protein",
+                label="External protein partner",
+                description="A protein outside the selected complex that connects through one or more mediating subunits.",
+            ),
+        ],
+        edgeTypes=[
+            LegendItem(
+                key="complex_external_ppi",
+                label="Complex external PPI partner",
+                description="The complex is connected to an external protein through mediating subunit-level PPI evidence.",
+            )
+        ],
+        evidenceLevels=[
+            LegendItem(
+                key="high",
+                label="High evidence",
+                description="Relationship has stronger supporting evidence such as structural support or multiple evidence channels.",
+            ),
+            LegendItem(
+                key="medium",
+                label="Medium evidence",
+                description="Relationship has moderate supporting evidence.",
+            ),
+            LegendItem(
+                key="low",
+                label="Low evidence",
+                description="Relationship is supported by limited evidence in the current dataset.",
+            ),
+            LegendItem(
+                key="unknown",
+                label="Unknown evidence",
+                description="Evidence level could not be determined from the current data.",
+            ),
+        ],
+    )
+
+
+def _make_complex_ext_stats(nodes: list[VizNode], edges: list[VizEdge]) -> NetworkStats:
+    return NetworkStats(
+        nodeCount=len(nodes),
+        edgeCount=len(edges),
+        proteinNodeCount=sum(1 for node in nodes if node.type == "protein"),
+        complexNodeCount=sum(1 for node in nodes if node.type == "complex"),
+        tfCount=sum(1 for node in nodes if node.proteinCategory == "TF"),
+        efCount=sum(1 for node in nodes if node.proteinCategory == "EF"),
+        tfAndEfCount=sum(1 for node in nodes if node.proteinCategory == "TF_and_EF"),
+        unknownCategoryCount=sum(1 for node in nodes if node.proteinCategory == "Unknown"),
+        ddiSupportedEdgeCount=sum(1 for edge in edges if edge.hasDDI),
+        dmiSupportedEdgeCount=sum(1 for edge in edges if edge.hasDMI),
+        structuralEvidenceEdgeCount=sum(1 for edge in edges if edge.hasStructuralEvidence),
+        confirmedPpiEdgeCount=sum(1 for edge in edges if edge.isConfirmedPpi),
+        coComplexOnlyEdgeCount=sum(1 for edge in edges if edge.isCoComplexOnly),
+        highEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "high"),
+        mediumEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "medium"),
+        lowEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "low"),
+        unknownEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "unknown"),
+    )
+
+
+def _make_complex_ext_edge(
+    *,
+    complex_id: str,
+    row: dict[str, Any],
+    source_id: str,
+    target_id: str,
+) -> VizEdge:
+    mediating_subunit_ids = split_list(
+        first_existing(row, ["mediating_subunit_ids", "mediating_ids"])
+    )
+    mediating_subunit_genes = split_list(
+        first_existing(row, ["mediating_subunit_genes", "mediating_genes"])
+    )
+    other_complex_ids = split_list(
+        first_existing(row, ["other_complex_ids", "other_complexes"])
+    )
+
+    edge_raw = {
+        **row,
+        "complexId": complex_id,
+        "complexName": first_existing(row, ["complex_name", "source_name"]),
+        "extGeneName": first_existing(row, ["ext_gene_name", "gene_symbol", "gene"]),
+        "mediatingSubunitIds": mediating_subunit_ids,
+        "mediatingSubunitGenes": mediating_subunit_genes,
+        "nMediatingSubunits": first_existing(
+            row,
+            ["n_mediating_subunits", "mediating_subunit_count"],
+        ),
+        "isSubunitOfOtherComplex": bool_value(
+            first_existing(
+                row,
+                ["is_subunit_of_other_complex", "is_subunit_of_complex"],
+            )
+        ),
+        "otherComplexIds": other_complex_ids,
+        "relationshipKind": "complex_external_ppi",
+    }
+
+    evidence = normalize_evidence(
+        {
+            **row,
+            "sources": first_existing(row, ["sources", "source_dbs"]),
+            "methods": first_existing(row, ["methods", "experimental_methods"]),
+            "publications": first_existing(row, ["publications", "pmids", "pmid"]),
+            "supporting_structures": first_existing(
+                row,
+                ["supporting_structures", "pdb_ids", "structures"],
+            ),
+            "ddi": first_existing(row, ["ddi", "domain_domain_interactions"]),
+            "dmi": first_existing(row, ["dmi", "domain_motif_interactions"]),
+            "n_ddi": first_existing(row, ["n_ddi", "ddi_count"]),
+            "n_dmi": first_existing(row, ["n_dmi", "dmi_count"]),
+        },
+        is_confirmed_ppi=True,
+        is_co_complex_only=False,
+    )
+
+    return VizEdge(
+        id=f"COMPLEX_EXT|{complex_id}|{target_id}",
+        source=source_id,
+        target=target_id,
+        type="complex_external_ppi",
+        label="External PPI partner",
+        raw=edge_raw,
+        **evidence,
+    )
+
+
+
 @router.get("/complex/{complex_id}/ext")
 def get_complex_ext(
     complex_id: str,
@@ -523,93 +661,68 @@ def get_complex_ext(
 
     all_edges = df[df[source_col].astype(str) == complex_id]
     total = len(all_edges)
-
     page = all_edges.iloc[offset: offset + limit]
 
-    nodes = {
-        complex_key(complex_id): complex_node(complex_id, complex_row)
-    }
+    center_node = _complex_center_node(complex_id, complex_row)
+    nodes_by_id: dict[str, VizNode] = {center_node.id: center_node}
+    viz_edges: list[VizEdge] = []
 
-    edges = []
-
-    for _, row in page.iterrows():
-        row = row.to_dict()
-
+    for _, raw_row in page.iterrows():
+        row = raw_row.to_dict()
         target_uniprot = clean(row.get(target_col))
 
         if target_uniprot == "暂无数据":
             continue
 
-        protein_row = store.ext_protein_by_uniprot.get(target_uniprot, {})
-
-        nodes[protein_key(target_uniprot)] = protein_node(
-            target_uniprot,
-            protein_row,
-            node_type="ExternalProtein",
+        protein_row = (
+            store.ext_protein_by_uniprot.get(target_uniprot)
+            or store.ppi_protein_by_uniprot.get(target_uniprot)
+            or store.intra_protein_by_uniprot.get(target_uniprot)
+            or _fallback_protein_raw(target_uniprot)
         )
 
-        source_id = complex_key(complex_id)
-        target_id = protein_key(target_uniprot)
+        target_node = normalize_protein_node(
+            _protein_raw_for_normalizer(target_uniprot, protein_row),
+            is_center=False,
+        )
+        nodes_by_id[target_node.id] = target_node
 
-        edges.append(
-            edge(
-                edge_id=f"EXT_PPI|{source_id}|{target_id}",
-                source=source_id,
-                target=target_id,
-                edge_type="EXT_PPI_PARTNER",
-                extra={
-                    "complexName": first_existing(row, ["complex_name", "source_name"]),
-                    "extGeneName": first_existing(row, ["ext_gene_name", "gene_symbol", "gene"]),
-                    "mediatingSubunitIds": split_list(
-                        first_existing(row, ["mediating_subunit_ids", "mediating_ids"])
-                    ),
-                    "mediatingSubunitGenes": split_list(
-                        first_existing(row, ["mediating_subunit_genes", "mediating_genes"])
-                    ),
-                    "nMediatingSubunits": first_existing(
-                        row,
-                        ["n_mediating_subunits", "mediating_subunit_count"],
-                    ),
-                    "isSubunitOfOtherComplex": bool_value(
-                        first_existing(
-                            row,
-                            ["is_subunit_of_other_complex", "is_subunit_of_complex"],
-                        )
-                    ),
-                    "otherComplexIds": split_list(
-                        first_existing(row, ["other_complex_ids", "other_complexes"])
-                    ),
-                    "sources": split_list(first_existing(row, ["sources", "source_dbs"])),
-                    "methods": split_list(first_existing(row, ["methods", "experimental_methods"])),
-                    "publications": split_list(first_existing(row, ["publications", "pmids", "pmid"])),
-                    "supportingStructures": split_list(
-                        first_existing(row, ["supporting_structures", "pdb_ids", "structures"])
-                    ),
-                },
+        viz_edges.append(
+            _make_complex_ext_edge(
+                complex_id=complex_id,
+                row=row,
+                source_id=center_node.id,
+                target_id=target_node.id,
             )
         )
 
-    return {
-        "complex": {
-            "id": complex_id,
-            "key": complex_key(complex_id),
-            "label": first_existing(complex_row, ["name", "complex_name"]),
-        },
-        "nodes": list(nodes.values()),
-        "edges": edges,
-        "pagination": {
+    viz_nodes = list(nodes_by_id.values())
+    has_more = offset + limit < total
+
+    response = NetworkResponse(
+        graphType="complex_ext",
+        center=center_node,
+        nodes=viz_nodes,
+        edges=viz_edges,
+        stats=_make_complex_ext_stats(viz_nodes, viz_edges),
+        legend=_complex_ext_legend(),
+        pagination=PaginationInfo(
+            limit=limit,
+            offset=offset,
+            total=total,
+            hasMore=has_more,
+        ),
+        filters={
             "limit": limit,
             "offset": offset,
-            "total": total,
-            "returned": len(edges),
-            "nextOffset": offset + limit if offset + limit < total else None,
         },
-        "stats": {
-            "nodeCount": len(nodes),
-            "edgeCount": len(edges),
-        },
-        "truncated": offset + limit < total,
-    }
+        warnings=[
+            "This endpoint now returns the standard NetworkResponse model. Complex external edges represent external protein partners connected through mediating subunits; inspect raw.mediatingSubunitIds and raw.mediatingSubunitGenes for the subunit-level explanation."
+        ],
+    )
+
+    return response.model_dump(mode="json")
+
 
 
 def detect_intra_complex_col(df):
