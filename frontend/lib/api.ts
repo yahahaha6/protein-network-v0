@@ -106,6 +106,14 @@ export type NetworkResponse = {
   truncated?: boolean;
 };
 
+export type ProteinNeighborFilters = {
+  source?: string;
+  protein_category?: string;
+  has_ddi?: boolean;
+  has_dmi?: boolean;
+  has_pdb?: boolean;
+};
+
 export type GlobalPpiNeighborFilters = {
   source?: string;
   protein_category?: string;
@@ -223,9 +231,37 @@ export async function getProteinDetail(proteinId: string) {
   return fetchJson<DetailRecord>(`${API_BASE_URL}/api/protein/${proteinId}`);
 }
 
-export async function getProteinNeighbors(proteinId: string, limit = 20) {
+export async function getProteinNeighbors(
+  proteinId: string,
+  limit = 20,
+  filters: ProteinNeighborFilters = {}
+) {
+  const query = new URLSearchParams({
+    limit: String(limit),
+  });
+
+  if (filters.source) {
+    query.set("source", filters.source);
+  }
+
+  if (filters.protein_category) {
+    query.set("protein_category", filters.protein_category);
+  }
+
+  if (typeof filters.has_ddi === "boolean") {
+    query.set("has_ddi", String(filters.has_ddi));
+  }
+
+  if (typeof filters.has_dmi === "boolean") {
+    query.set("has_dmi", String(filters.has_dmi));
+  }
+
+  if (typeof filters.has_pdb === "boolean") {
+    query.set("has_pdb", String(filters.has_pdb));
+  }
+
   return fetchJson<NetworkResponse>(
-    `${API_BASE_URL}/api/protein/${proteinId}/neighbors?limit=${limit}`
+    `${API_BASE_URL}/api/protein/${proteinId}/neighbors?${query.toString()}`
   );
 }
 
