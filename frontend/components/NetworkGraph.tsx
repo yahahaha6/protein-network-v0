@@ -654,7 +654,43 @@ function applyEdgeEvidenceClasses(cy: Core) {
       "domainMotifInteractions",
     ]);
 
-    edge.removeClass("has-ddi has-dmi has-ddi-dmi");
+    const hasStructuralEvidence = edgeHasAnyEvidenceField(edgeData, [
+      "hasStructuralEvidence",
+      "supportingStructures",
+      "supporting_structures",
+      "pdb",
+      "pdbIds",
+      "pdb_ids",
+    ]);
+
+    const isConfirmedPpi = edgeHasAnyEvidenceField(edgeData, [
+      "isConfirmedPpi",
+      "is_confirmed_ppi",
+    ]);
+
+    const evidenceLevel = String(edgeData.evidenceLevel || "").toLowerCase();
+
+    const isCoComplexOnly =
+      edgeHasAnyEvidenceField(edgeData, [
+        "isCoComplexOnly",
+        "is_co_complex_only",
+      ]) || evidenceLevel === "co_complex_only";
+
+    edge.removeClass(
+      [
+        "has-ddi",
+        "has-dmi",
+        "has-ddi-dmi",
+        "has-structural-evidence",
+        "confirmed-ppi",
+        "co-complex-only",
+        "evidence-high",
+        "evidence-medium",
+        "evidence-low",
+        "evidence-unknown",
+        "evidence-co-complex-only",
+      ].join(" ")
+    );
 
     if (hasDdi) {
       edge.addClass("has-ddi");
@@ -666,6 +702,26 @@ function applyEdgeEvidenceClasses(cy: Core) {
 
     if (hasDdi && hasDmi) {
       edge.addClass("has-ddi-dmi");
+    }
+
+    if (hasStructuralEvidence) {
+      edge.addClass("has-structural-evidence");
+    }
+
+    if (isConfirmedPpi) {
+      edge.addClass("confirmed-ppi");
+    }
+
+    if (isCoComplexOnly) {
+      edge.addClass("co-complex-only");
+    }
+
+    if (
+      ["high", "medium", "low", "unknown", "co_complex_only"].includes(
+        evidenceLevel
+      )
+    ) {
+      edge.addClass(`evidence-${evidenceLevel.replace(/_/g, "-")}`);
     }
   });
 }
@@ -864,7 +920,60 @@ const networkStyle = [
       "line-color": "#f8fafc",
       opacity: 1,
     },
+  },  {
+    selector: "edge.has-structural-evidence",
+    style: {
+      width: 5,
+      "line-style": "solid",
+    },
   },
+  {
+    selector: "edge.confirmed-ppi",
+    style: {
+      "line-style": "solid",
+      opacity: 0.95,
+    },
+  },
+  {
+    selector: "edge.co-complex-only",
+    style: {
+      "line-style": "dashed",
+      opacity: 0.65,
+    },
+  },
+  {
+    selector: "edge.evidence-co-complex-only",
+    style: {
+      "line-style": "dashed",
+      opacity: 0.65,
+    },
+  },
+  {
+    selector: "edge.evidence-high",
+    style: {
+      width: 5,
+    },
+  },
+  {
+    selector: "edge.evidence-medium",
+    style: {
+      width: 3,
+    },
+  },
+  {
+    selector: "edge.evidence-low",
+    style: {
+      opacity: 0.8,
+    },
+  },
+  {
+    selector: "edge.evidence-unknown",
+    style: {
+      "line-style": "dotted",
+      opacity: 0.55,
+    },
+  },
+
 ] as cytoscape.StylesheetJson;
 
 
@@ -1304,6 +1413,16 @@ export default function NetworkGraph({
           <span className="inline-flex items-center gap-2">
             <span className="h-1.5 w-8 rounded-full bg-yellow-400" />
             DDI + DMI
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2 w-8 rounded-full bg-slate-200" />
+            Structural / PDB evidence
+          </span>
+
+          <span className="inline-flex items-center gap-2">
+            <span className="h-1.5 w-8 rounded-full bg-slate-300" />
+            High evidence
           </span>
 
           <span className="inline-flex items-center gap-2">
