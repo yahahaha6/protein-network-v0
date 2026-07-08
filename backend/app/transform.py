@@ -1,3 +1,11 @@
+"""
+Transformation helpers for API responses and Cytoscape graph elements.
+
+The raw TSV rows are not directly returned to the frontend. This module cleans
+missing values, normalizes common identifiers, and converts protein / complex /
+edge records into the JSON structure expected by the Next.js Cytoscape viewer.
+"""
+
 from typing import Optional
 def clean(value):
     """
@@ -41,10 +49,12 @@ def split_list(value, sep=";"):
 
 
 def complex_key(complex_id: str):
+    """Return the Cytoscape node ID used for a CORUM complex."""
     return f"CORUM:{complex_id}"
 
 
 def protein_key(uniprot_ac: str):
+    """Return the Cytoscape node ID used for a UniProt protein."""
     return f"UniProt:{uniprot_ac}"
 
 
@@ -88,6 +98,12 @@ def bool_value(value):
 
 
 def complex_node(complex_id: str, row: Optional[dict] = None):
+    """
+    Build a Cytoscape node object for one protein complex.
+
+    The frontend expects every node to have a data object with at least id,
+    label, and type fields.
+    """
     row = row or {}
 
     name = first_existing(row, ["name", "complex_name"])
@@ -103,8 +119,13 @@ def complex_node(complex_id: str, row: Optional[dict] = None):
 
 
 def protein_node(uniprot_ac: str, row: Optional[dict] = None, node_type: str = "Protein"):
-    row = row or {}
+    """
+    Build a Cytoscape node object for one protein.
 
+    The node includes display fields such as gene label, protein name, and
+    category so the frontend can color TF / EF / TF_and_EF nodes.
+    """
+    row = row or {}
     gene = first_existing(row, ["gene_symbol", "gene", "ext_gene_name", "gene_name"])
     protein_name = first_existing(row, ["protein_name", "name", "recommended_name"])
     category = first_existing(row, ["protein_category", "category"])
@@ -121,6 +142,12 @@ def protein_node(uniprot_ac: str, row: Optional[dict] = None, node_type: str = "
     }
 
 def edge(edge_id: str, source: str, target: str, edge_type: str, extra: Optional[dict] = None):
+    """
+    Build a Cytoscape edge object.
+
+    Extra evidence fields such as sources, methods, publications, DDI, and DMI
+    are merged into edge.data so the frontend can show detailed evidence panels.
+    """
     data = {
         "id": edge_id,
         "source": source,

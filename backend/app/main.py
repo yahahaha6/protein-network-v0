@@ -1,3 +1,12 @@
+"""
+FastAPI application entry point for Protein Network Explorer.
+
+This file creates the API app, configures middleware, and registers route
+modules for health checks, search, protein detail / neighborhood views, complex
+views, and global PPI views.
+"""
+
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,7 +22,7 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
-
+# Register read-only API routers used by the Next.js frontend.
 app.include_router(health.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(complex.router, prefix="/api")
