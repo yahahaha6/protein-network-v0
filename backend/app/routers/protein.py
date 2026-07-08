@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
@@ -176,6 +176,72 @@ def _make_protein_network_stats(nodes: list[VizNode], edges: list[VizEdge]) -> N
     )
 
 
+
+def _matches_optional_bool(value: bool, expected: Optional[bool]) -> bool:
+    if expected is None:
+        return True
+
+    return value is expected
+
+
+def _normalize_filter_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    text = value.strip()
+
+    if not text:
+        return None
+
+    return text.lower()
+
+
+def _edge_matches_source(edge: VizEdge, source_filter: Optional[str]) -> bool:
+    normalized = _normalize_filter_text(source_filter)
+
+    if normalized is None:
+        return True
+
+    return any(normalized in source.lower() for source in edge.evidenceSources)
+
+
+def _node_matches_category(node: VizNode, category_filter: Optional[str]) -> bool:
+    normalized = _normalize_filter_text(category_filter)
+
+    if normalized is None:
+        return True
+
+    return node.proteinCategory.lower() == normalized
+
+
+def _protein_edge_passes_filters(
+    *,
+    edge: VizEdge,
+    other_node: VizNode,
+    source: Optional[str],
+    protein_category: Optional[str],
+    has_ddi: Optional[bool],
+    has_dmi: Optional[bool],
+    has_pdb: Optional[bool],
+) -> bool:
+    if not _edge_matches_source(edge, source):
+        return False
+
+    if not _node_matches_category(other_node, protein_category):
+        return False
+
+    if not _matches_optional_bool(edge.hasDDI, has_ddi):
+        return False
+
+    if not _matches_optional_bool(edge.hasDMI, has_dmi):
+        return False
+
+    if not _matches_optional_bool(edge.hasStructuralEvidence, has_pdb):
+        return False
+
+    return True
+
+
 def _make_protein_neighbor_edge(
     *,
     row: dict[str, Any],
@@ -306,6 +372,11 @@ def get_protein(uniprot_ac: str):
 def get_protein_neighbors(
     uniprot_ac: str,
     limit: int = Query(default=100, ge=1, le=300),
+    source: Optional[str] = None,
+    protein_category: Optional[str] = None,
+    has_ddi: Optional[bool] = None,
+    has_dmi: Optional[bool] = None,
+    has_pdb: Optional[bool] = None,
 ):
     center_row = find_protein_row(uniprot_ac)
 
@@ -335,9 +406,6 @@ def get_protein_neighbors(
         | (df[target_col].astype(str) == uniprot_ac)
     ]
 
-    total = len(sub)
-    page = sub.head(limit)
-
     center_node = normalize_protein_node(
         _protein_raw_for_normalizer(uniprot_ac, center_row),
         is_center=True,
@@ -347,8 +415,9 @@ def get_protein_neighbors(
         center_node.id: center_node,
     }
     viz_edges: list[VizEdge] = []
+    matched_count = 0
 
-    for _, raw_row in page.iterrows():
+    for _, raw_row in sub.iterrows():
         row = raw_row.to_dict()
 
         protein_a = clean(row.get(source_col))
@@ -365,17 +434,33 @@ def get_protein_neighbors(
             is_center=False,
         )
 
-        nodes_by_id[other_node.id] = other_node
-
-        viz_edges.append(
-            _make_protein_neighbor_edge(
-                row=row,
-                source_id=protein_a,
-                target_id=protein_b,
-            )
+        viz_edge = _make_protein_neighbor_edge(
+            row=row,
+            source_id=protein_a,
+            target_id=protein_b,
         )
 
+        if not _protein_edge_passes_filters(
+            edge=viz_edge,
+            other_node=other_node,
+            source=source,
+            protein_category=protein_category,
+            has_ddi=has_ddi,
+            has_dmi=has_dmi,
+            has_pdb=has_pdb,
+        ):
+            continue
+
+        matched_count += 1
+
+        if len(viz_edges) >= limit:
+            continue
+
+        nodes_by_id[other_node.id] = other_node
+        viz_edges.append(viz_edge)
+
     viz_nodes = list(nodes_by_id.values())
+    total = matched_count
 
     response = NetworkResponse(
         graphType="protein_neighborhood",
@@ -392,6 +477,11 @@ def get_protein_neighbors(
         ),
         filters={
             "limit": limit,
+            "source": source,
+            "protein_category": protein_category,
+            "has_ddi": has_ddi,
+            "has_dmi": has_dmi,
+            "has_pdb": has_pdb,
         },
         warnings=[
             "This endpoint now returns the standard NetworkResponse model. Frontend code should use normalized node and edge fields instead of raw Cytoscape element data."
