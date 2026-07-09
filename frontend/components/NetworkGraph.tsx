@@ -653,128 +653,6 @@ function getEdgeTitle(edgeData: DetailRecord) {
 function formatSummaryValue(value: unknown) {
   return formatCompactDetailValue(value);
 }
-const DEFAULT_EVIDENCE_SOURCE_FILTERS = [
-  "BioGRID",
-  "HPA",
-  "IntAct",
-  "PDB",
-  "CORUM",
-];
-
-const EVIDENCE_SOURCE_KEYS = [
-  "evidenceSources",
-  "evidence_sources",
-  "sources",
-  "source",
-  "source_database",
-  "source_databases",
-  "sourceDatabase",
-  "sourceDatabases",
-  "databases",
-  "database",
-];
-
-function normalizeEvidenceSourceLabel(value: string) {
-  const cleaned = value
-    .trim()
-    .replace(/^["'\[]+|["'\]]+$/g, "")
-    .trim();
-
-  const lower = cleaned.toLowerCase();
-
-  if (lower.includes("biogrid")) {
-    return "BioGRID";
-  }
-
-  if (lower.includes("human protein atlas") || lower === "hpa") {
-    return "HPA";
-  }
-
-  if (lower.includes("intact")) {
-    return "IntAct";
-  }
-
-  if (lower.includes("rcsb") || lower === "pdb" || lower.includes("pdb")) {
-    return "PDB";
-  }
-
-  if (lower.includes("corum")) {
-    return "CORUM";
-  }
-
-  return cleaned;
-}
-
-function splitEvidenceSourceValue(value: unknown): string[] {
-  if (value === null || value === undefined || value === "") {
-    return [];
-  }
-
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => splitEvidenceSourceValue(item));
-  }
-
-  if (typeof value === "object") {
-    return Object.values(value as Record<string, unknown>).flatMap((item) =>
-      splitEvidenceSourceValue(item)
-    );
-  }
-
-  const raw = String(value).trim();
-
-  if (!raw) {
-    return [];
-  }
-
-  if (
-    (raw.startsWith("[") && raw.endsWith("]")) ||
-    (raw.startsWith("{") && raw.endsWith("}"))
-  ) {
-    try {
-      return splitEvidenceSourceValue(JSON.parse(raw));
-    } catch {
-      // Fall through to text splitting.
-    }
-  }
-
-  return raw
-    .split(/[,;|]/)
-    .map((item) => normalizeEvidenceSourceLabel(item))
-    .filter(Boolean);
-}
-
-function extractEvidenceSources(data: DetailRecord) {
-  const sources = EVIDENCE_SOURCE_KEYS.flatMap((key) =>
-    splitEvidenceSourceValue(data[key])
-  );
-
-  return Array.from(new Set(sources));
-}
-
-function getNodeElementId(node: ElementDefinition) {
-  return String((node.data as DetailRecord | undefined)?.id || "");
-}
-
-function getEdgeEndpointIds(edge: ElementDefinition) {
-  const data = (edge.data || {}) as DetailRecord;
-
-  return {
-    source: String(data.source || ""),
-    target: String(data.target || ""),
-  };
-}
-
-function nodeMatchesFocus(node: ElementDefinition, focusNodeId?: string) {
-  if (!focusNodeId) {
-    return false;
-  }
-
-  const data = (node.data || {}) as DetailRecord;
-  const id = String(data.id || "");
-  const label = String(data.label || "");
-
-  return idsMatch(id, focusNodeId) || idsMatch(label, focusNodeId);
-}
 function applyEdgeEvidenceClasses(cy: Core, graphType?: string) {
   const semanticProfile = getNetworkSemanticProfile(graphType);
   const managedClasses = MANAGED_EDGE_PRESENTATION_CLASSES.join(" ");
@@ -1131,63 +1009,7 @@ export default function NetworkGraph({
 
   const graphElements = useMemo(() => toNetworkElements(elements), [elements]);
 
-    const [selectedElement, setSelectedElement] = useState<SelectedElement>(null);
-  const [activeEvidenceSources, setActiveEvidenceSources] = useState<string[]>(
-    []
-  );
-
-  const evidenceSourceOptions = useMemo(() => {
-    const discoveredSources = graphElements.edges.flatMap((edge) =>
-      extractEvidenceSources((edge.data || {}) as DetailRecord)
-    );
-
-    return Array.from(
-      new Set([...DEFAULT_EVIDENCE_SOURCE_FILTERS, ...discoveredSources])
-    ).filter(Boolean);
-  }, [graphElements.edges]);
-
-  const filteredElements = useMemo(() => {
-    if (activeEvidenceSources.length === 0) {
-      return graphElements;
-    }
-
-    const activeSet = new Set(activeEvidenceSources);
-
-    const filteredEdges = graphElements.edges.filter((edge) => {
-      const edgeSources = extractEvidenceSources(
-        (edge.data || {}) as DetailRecord
-      );
-
-      return edgeSources.some((source) => activeSet.has(source));
-    });
-
-    const visibleNodeIds = new Set<string>();
-
-    filteredEdges.forEach((edge) => {
-      const { source, target } = getEdgeEndpointIds(edge);
-      visibleNodeIds.add(source);
-      visibleNodeIds.add(target);
-    });
-
-    const filteredNodes = graphElements.nodes.filter((node) => {
-      const nodeId = getNodeElementId(node);
-
-      return visibleNodeIds.has(nodeId) || nodeMatchesFocus(node, focusNodeId);
-    });
-
-    return {
-      nodes: filteredNodes,
-      edges: filteredEdges,
-    };
-  }, [activeEvidenceSources, graphElements, focusNodeId]);
-
-  function toggleEvidenceSource(source: string) {
-    setActiveEvidenceSources((current) =>
-      current.includes(source)
-        ? current.filter((item) => item !== source)
-        : [...current, source]
-    );
-  }
+  const [selectedElement, setSelectedElement] = useState<SelectedElement>(null);
 
   const graphType =
     typeof (elements as { graphType?: unknown }).graphType === "string"
@@ -1267,31 +1089,35 @@ export default function NetworkGraph({
     link.click();
   }
 
-  function downloadRawJson() {
-  const payload = {
-    graphName,
-    downloadedAt: new Date().toISOString(),
-    focusNodeId: focusNodeId ?? null,
-        activeEvidenceSources,
-    nodeCount: filteredElements.nodes.length,
-    edgeCount: filteredElements.edges.length,
-    nodes: filteredElements.nodes,
-    edges: filteredElements.edges,
-  };
+  function downloadNetworkJson() {
+    const payload = {
+      graphName,
+      downloadedAt: new Date().toISOString(),
+      focusNodeId: focusNodeId ?? null,
+      exportKind: "canonical_network",
+      canonicalNetwork: {
+        description:
+          "The complete current backend response page after backend filters and pagination.",
+        nodeCount: graphElements.nodes.length,
+        edgeCount: graphElements.edges.length,
+        nodes: graphElements.nodes,
+        edges: graphElements.edges,
+      },
+    };
 
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: "application/json",
-  });
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
 
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
 
-  link.href = url;
-  link.download = `${makeSafeFileName(graphName)}_raw.json`;
-  link.click();
+    link.href = url;
+    link.download = `${makeSafeFileName(graphName)}_network.json`;
+    link.click();
 
-  URL.revokeObjectURL(url);
-}
+    URL.revokeObjectURL(url);
+  }
 
   function openSelectedNode() {
     if (selectedNodeHref) {
@@ -1306,7 +1132,7 @@ export default function NetworkGraph({
 
     setSelectedElement(null);
 
-        const focusedElements = addFocusToElements(filteredElements, focusNodeId);
+        const focusedElements = addFocusToElements(graphElements, focusNodeId);
 
     const cy = cytoscape({
       container: containerRef.current,
@@ -1378,7 +1204,7 @@ export default function NetworkGraph({
       cy.destroy();
       cyRef.current = null;
     };
-    }, [filteredElements, focusNodeId, layoutName, showEdgeLabels]);
+    }, [graphElements, focusNodeId, layoutName, showEdgeLabels]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -1388,7 +1214,7 @@ export default function NetworkGraph({
     }
 
     applyEdgeEvidenceClasses(cy, graphType);
-  }, [filteredElements, graphType]);
+  }, [graphElements, graphType]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -1430,60 +1256,14 @@ export default function NetworkGraph({
 
   <button
     type="button"
-    onClick={downloadRawJson}
+    onClick={downloadNetworkJson}
     className="rounded-lg border border-cyan-800 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-950/50"
   >
-    Download Raw JSON
+    Download Network JSON
   </button>
 </div>
         </div>
-        <div className="mb-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-                Evidence source filter
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Filter visible edges by evidence database. No selected filter
-                means all edges are shown.
-              </p>
-            </div>
 
-            <button
-              type="button"
-              onClick={() => setActiveEvidenceSources([])}
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-            >
-              Show All
-            </button>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {evidenceSourceOptions.map((source) => {
-              const isActive = activeEvidenceSources.includes(source);
-
-              return (
-                <button
-                  key={source}
-                  type="button"
-                  onClick={() => toggleEvidenceSource(source)}
-                  className={
-                    isActive
-                      ? "rounded-full border border-cyan-400 bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-100"
-                      : "rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-                  }
-                >
-                  {source}
-                </button>
-              );
-            })}
-          </div>
-
-          <p className="mt-2 text-xs text-slate-500">
-            Showing {filteredElements.nodes.length} nodes and{" "}
-            {filteredElements.edges.length} edges.
-          </p>
-        </div>
                 <div
                 
   ref={containerRef}
@@ -1535,8 +1315,8 @@ export default function NetworkGraph({
           ))}
         </div>
                 <NetworkAttributeTable
-          nodes={filteredElements.nodes}
-          edges={filteredElements.edges}
+          nodes={graphElements.nodes}
+          edges={graphElements.edges}
         />
       </section>
 
