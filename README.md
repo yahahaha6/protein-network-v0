@@ -264,7 +264,7 @@ V1 includes:
 - Edge evidence inspection
 - Global PPI neighborhood exploration
 - PNG graph export
-- Raw JSON graph export
+- Network JSON graph export for the canonical current backend response page
 - Local-only private data workflow
 
 ## Future Work

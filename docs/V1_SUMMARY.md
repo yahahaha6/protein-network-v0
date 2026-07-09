@@ -192,7 +192,7 @@ frontend/lib/api.ts
 - Fit View
 - Reset Layout
 - Download PNG
-- Download Raw JSON
+- Download Network JSON
 - Default node navigation
 - Global PPI node navigation
 
@@ -296,7 +296,7 @@ Edge click works
 Fit View works
 Reset Layout works
 Download PNG works
-Download Raw JSON works
+Download Network JSON works and exports the canonical current backend response page
 Global PPI node navigation works
 ```
 
