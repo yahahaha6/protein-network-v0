@@ -637,11 +637,88 @@ def _make_complex_ext_edge(
 
 
 
+def _normalize_filter_text(value: str) -> str:
+    return value.strip().lower()
+
+
+def _complex_ext_edge_matches_source(edge: VizEdge, source_filter: Optional[str]) -> bool:
+    if not source_filter:
+        return True
+
+    expected = _normalize_filter_text(source_filter)
+    raw = edge.raw or {}
+
+    candidates = list(edge.evidenceSources or [])
+
+    raw_sources = raw.get("sources") or raw.get("source_dbs")
+    if isinstance(raw_sources, str):
+        candidates.extend(split_list(raw_sources))
+    elif isinstance(raw_sources, list):
+        candidates.extend(str(item) for item in raw_sources)
+
+    return any(expected in _normalize_filter_text(str(candidate)) for candidate in candidates)
+
+
+def _complex_ext_node_matches_category(
+    node: VizNode,
+    protein_category: Optional[str],
+) -> bool:
+    if not protein_category:
+        return True
+
+    return _normalize_filter_text(node.proteinCategory) == _normalize_filter_text(
+        protein_category
+    )
+
+
+def _complex_ext_edge_passes_filters(
+    *,
+    edge: VizEdge,
+    target_node: VizNode,
+    source: Optional[str],
+    protein_category: Optional[str],
+    has_ddi: Optional[bool],
+    has_dmi: Optional[bool],
+    has_pdb: Optional[bool],
+    is_subunit_of_other_complex: Optional[bool],
+) -> bool:
+    if not _complex_ext_edge_matches_source(edge, source):
+        return False
+
+    if not _complex_ext_node_matches_category(target_node, protein_category):
+        return False
+
+    if not _matches_optional_bool(edge.hasDDI, has_ddi):
+        return False
+
+    if not _matches_optional_bool(edge.hasDMI, has_dmi):
+        return False
+
+    if not _matches_optional_bool(edge.hasStructuralEvidence, has_pdb):
+        return False
+
+    raw = edge.raw or {}
+    if not _matches_optional_bool(
+        bool(raw.get("isSubunitOfOtherComplex")),
+        is_subunit_of_other_complex,
+    ):
+        return False
+
+    return True
+
+
+
 @router.get("/complex/{complex_id}/ext")
 def get_complex_ext(
     complex_id: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    source: Optional[str] = None,
+    protein_category: Optional[str] = None,
+    has_ddi: Optional[bool] = None,
+    has_dmi: Optional[bool] = None,
+    has_pdb: Optional[bool] = None,
+    is_subunit_of_other_complex: Optional[bool] = None,
 ):
     complex_row = store.complex_by_id.get(complex_id)
 
@@ -660,14 +737,13 @@ def get_complex_ext(
     target_col = detect_ext_target_col(df)
 
     all_edges = df[df[source_col].astype(str) == complex_id]
-    total = len(all_edges)
-    page = all_edges.iloc[offset: offset + limit]
 
     center_node = _complex_center_node(complex_id, complex_row)
     nodes_by_id: dict[str, VizNode] = {center_node.id: center_node}
     viz_edges: list[VizEdge] = []
+    matched_total = 0
 
-    for _, raw_row in page.iterrows():
+    for _, raw_row in all_edges.iterrows():
         row = raw_row.to_dict()
         target_uniprot = clean(row.get(target_col))
 
@@ -685,19 +761,34 @@ def get_complex_ext(
             _protein_raw_for_normalizer(target_uniprot, protein_row),
             is_center=False,
         )
-        nodes_by_id[target_node.id] = target_node
 
-        viz_edges.append(
-            _make_complex_ext_edge(
-                complex_id=complex_id,
-                row=row,
-                source_id=center_node.id,
-                target_id=target_node.id,
-            )
+        viz_edge = _make_complex_ext_edge(
+            complex_id=complex_id,
+            row=row,
+            source_id=center_node.id,
+            target_id=target_node.id,
         )
 
+        if not _complex_ext_edge_passes_filters(
+            edge=viz_edge,
+            target_node=target_node,
+            source=source,
+            protein_category=protein_category,
+            has_ddi=has_ddi,
+            has_dmi=has_dmi,
+            has_pdb=has_pdb,
+            is_subunit_of_other_complex=is_subunit_of_other_complex,
+        ):
+            continue
+
+        if matched_total >= offset and len(viz_edges) < limit:
+            nodes_by_id[target_node.id] = target_node
+            viz_edges.append(viz_edge)
+
+        matched_total += 1
+
     viz_nodes = list(nodes_by_id.values())
-    has_more = offset + limit < total
+    has_more = offset + len(viz_edges) < matched_total
 
     response = NetworkResponse(
         graphType="complex_ext",
@@ -709,15 +800,21 @@ def get_complex_ext(
         pagination=PaginationInfo(
             limit=limit,
             offset=offset,
-            total=total,
+            total=matched_total,
             hasMore=has_more,
         ),
         filters={
             "limit": limit,
             "offset": offset,
+            "source": source,
+            "protein_category": protein_category,
+            "has_ddi": has_ddi,
+            "has_dmi": has_dmi,
+            "has_pdb": has_pdb,
+            "is_subunit_of_other_complex": is_subunit_of_other_complex,
         },
         warnings=[
-            "This endpoint now returns the standard NetworkResponse model. Complex external edges represent external protein partners connected through mediating subunits; inspect raw.mediatingSubunitIds and raw.mediatingSubunitGenes for the subunit-level explanation."
+            "This endpoint returns a standard NetworkResponse model. Complex external edges represent external protein partners connected through mediating subunits; inspect raw.mediatingSubunitIds and raw.mediatingSubunitGenes for the subunit-level explanation."
         ],
     )
 
