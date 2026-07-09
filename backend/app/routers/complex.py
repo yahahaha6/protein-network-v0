@@ -24,6 +24,7 @@ from app.schemas.visualization import (
     NetworkResponse,
     NetworkStats,
     PaginationInfo,
+    MediatingSubunit,
     VizEdge,
     VizNode,
 )
@@ -502,49 +503,89 @@ def get_complex_intra(
 
 def _complex_ext_legend() -> NetworkLegend:
     return NetworkLegend(
-        nodeTypes=[
+        nodeCategories=[
             LegendItem(
                 key="complex",
                 label="Center complex",
-                description="The CORUM complex used as the source of external PPI relationships.",
+                description="The queried CORUM complex that connects to external protein partners.",
+                color="slate",
             ),
             LegendItem(
                 key="protein",
                 label="External protein partner",
                 description="A protein outside the selected complex that connects through one or more mediating subunits.",
+                color="blue",
+            ),
+            LegendItem(
+                key="TF",
+                label="TF external partner",
+                description="External partner annotated as a transcription factor.",
+            ),
+            LegendItem(
+                key="EF",
+                label="EF external partner",
+                description="External partner annotated as an epigenetic factor.",
+            ),
+            LegendItem(
+                key="TF_and_EF",
+                label="TF and EF external partner",
+                description="External partner annotated as both TF and EF.",
+            ),
+            LegendItem(
+                key="Unknown",
+                label="Unknown external partner category",
+                description="External partner category is unavailable or unknown.",
             ),
         ],
-        edgeTypes=[
+        edgeEvidence=[
             LegendItem(
                 key="complex_external_ppi",
                 label="Complex external PPI partner",
-                description="The complex is connected to an external protein through mediating subunit-level PPI evidence.",
-            )
+                description="The complex connects to an external protein through one or more mediating subunit-level PPI relationships.",
+                lineStyle="solid",
+            ),
+            LegendItem(
+                key="other_complex",
+                label="Partner also appears in other complexes",
+                description="The external partner is annotated as a subunit of at least one other complex.",
+                lineStyle="dashed",
+            ),
+            LegendItem(
+                key="structural",
+                label="Structural / PDB-supported external partner",
+                description="The complex external relationship has supporting structural evidence.",
+                lineStyle="solid",
+            ),
+            LegendItem(
+                key="structural_other_complex",
+                label="PDB-supported and in other complexes",
+                description="The external partner has structural support and is also annotated in other complexes.",
+                lineStyle="solid",
+            ),
         ],
-        evidenceLevels=[
+        badges=[
             LegendItem(
-                key="high",
-                label="High evidence",
-                description="Relationship has stronger supporting evidence such as structural support or multiple evidence channels.",
+                key="DDI",
+                label="DDI",
+                description="Domain-domain interaction evidence exists.",
             ),
             LegendItem(
-                key="medium",
-                label="Medium evidence",
-                description="Relationship has moderate supporting evidence.",
+                key="DMI",
+                label="DMI",
+                description="Domain-motif interaction evidence exists.",
             ),
             LegendItem(
-                key="low",
-                label="Low evidence",
-                description="Relationship is supported by limited evidence in the current dataset.",
+                key="PDB",
+                label="PDB",
+                description="Supporting structural evidence exists.",
             ),
             LegendItem(
-                key="unknown",
-                label="Unknown evidence",
-                description="Evidence level could not be determined from the current data.",
+                key="OtherComplex",
+                label="Other complex",
+                description="External partner is also a subunit of other complexes.",
             ),
         ],
     )
-
 
 def _make_complex_ext_stats(nodes: list[VizNode], edges: list[VizEdge]) -> NetworkStats:
     return NetworkStats(
@@ -568,6 +609,64 @@ def _make_complex_ext_stats(nodes: list[VizNode], edges: list[VizEdge]) -> Netwo
     )
 
 
+def _optional_complex_ext_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+
+    if not text:
+        return None
+
+    if text.lower() in {
+        "nan",
+        "none",
+        "null",
+        "undefined",
+        "n/a",
+        "na",
+        "no data",
+        "not available",
+        "missing",
+    }:
+        return None
+
+    if text in {"暂无数据", "无数据", "-", "—"}:
+        return None
+
+    return text
+
+
+def _make_mediating_subunits(
+    *,
+    ids: list[str],
+    genes: list[str],
+) -> list[MediatingSubunit]:
+    mediating_subunits: list[MediatingSubunit] = []
+
+    for index, raw_subunit_id in enumerate(ids):
+        subunit_id = _optional_complex_ext_text(raw_subunit_id)
+
+        if subunit_id is None:
+            continue
+
+        gene = (
+            _optional_complex_ext_text(genes[index])
+            if index < len(genes)
+            else None
+        )
+        display_name = f"{gene} / {subunit_id}" if gene else subunit_id
+
+        mediating_subunits.append(
+            MediatingSubunit(
+                id=subunit_id,
+                gene=gene,
+                displayName=display_name,
+            )
+        )
+
+    return mediating_subunits
+
 def _make_complex_ext_edge(
     *,
     complex_id: str,
@@ -585,23 +684,54 @@ def _make_complex_ext_edge(
         first_existing(row, ["other_complex_ids", "other_complexes"])
     )
 
+    complex_name = _optional_complex_ext_text(
+        first_existing(row, ["complex_name", "source_name"])
+    )
+    external_partner_gene = _optional_complex_ext_text(
+        first_existing(
+            row,
+            ["ext_gene_name", "external_partner_gene", "gene_symbol", "gene"],
+        )
+    )
+    raw_is_subunit_of_other_complex = bool_value(
+        first_existing(
+            row,
+            ["is_subunit_of_other_complex", "is_subunit_of_complex"],
+        )
+    )
+    is_subunit_of_other_complex = raw_is_subunit_of_other_complex or bool(
+        other_complex_ids
+    )
+
+    mediating_subunits = _make_mediating_subunits(
+        ids=mediating_subunit_ids,
+        genes=mediating_subunit_genes,
+    )
+
+    raw_mediating_subunit_count = first_existing(
+        row,
+        ["n_mediating_subunits", "mediating_subunit_count"],
+    )
+    normalized_mediating_subunit_count = (
+        raw_mediating_subunit_count
+        if _optional_complex_ext_text(raw_mediating_subunit_count) is not None
+        else len(mediating_subunits)
+    )
+
     edge_raw = {
         **row,
         "complexId": complex_id,
-        "complexName": first_existing(row, ["complex_name", "source_name"]),
-        "extGeneName": first_existing(row, ["ext_gene_name", "gene_symbol", "gene"]),
+        "complexName": complex_name,
+        "externalPartnerId": target_id,
+        "externalPartnerGene": external_partner_gene,
+        "extGeneName": external_partner_gene,
+        "mediatingSubunits": [
+            subunit.model_dump(mode="json") for subunit in mediating_subunits
+        ],
         "mediatingSubunitIds": mediating_subunit_ids,
         "mediatingSubunitGenes": mediating_subunit_genes,
-        "nMediatingSubunits": first_existing(
-            row,
-            ["n_mediating_subunits", "mediating_subunit_count"],
-        ),
-        "isSubunitOfOtherComplex": bool_value(
-            first_existing(
-                row,
-                ["is_subunit_of_other_complex", "is_subunit_of_complex"],
-            )
-        ),
+        "nMediatingSubunits": normalized_mediating_subunit_count,
+        "isSubunitOfOtherComplex": is_subunit_of_other_complex,
         "otherComplexIds": other_complex_ids,
         "relationshipKind": "complex_external_ppi",
     }
@@ -632,10 +762,13 @@ def _make_complex_ext_edge(
         type="complex_external_ppi",
         label="External PPI partner",
         raw=edge_raw,
+        mediatingSubunits=mediating_subunits,
+        externalPartnerId=target_id,
+        externalPartnerGene=external_partner_gene,
+        isSubunitOfOtherComplex=is_subunit_of_other_complex,
+        otherComplexIds=other_complex_ids,
         **evidence,
     )
-
-
 
 def _normalize_filter_text(value: str) -> str:
     return value.strip().lower()
@@ -697,9 +830,8 @@ def _complex_ext_edge_passes_filters(
     if not _matches_optional_bool(edge.hasStructuralEvidence, has_pdb):
         return False
 
-    raw = edge.raw or {}
     if not _matches_optional_bool(
-        bool(raw.get("isSubunitOfOtherComplex")),
+        edge.isSubunitOfOtherComplex is True,
         is_subunit_of_other_complex,
     ):
         return False
@@ -814,7 +946,7 @@ def get_complex_ext(
             "is_subunit_of_other_complex": is_subunit_of_other_complex,
         },
         warnings=[
-            "This endpoint returns a standard NetworkResponse model. Complex external edges represent external protein partners connected through mediating subunits; inspect raw.mediatingSubunitIds and raw.mediatingSubunitGenes for the subunit-level explanation."
+            "This endpoint returns the standard NetworkResponse model. Complex external edges represent external protein partners connected through mediating subunits; use edge.mediatingSubunits, edge.externalPartnerId, edge.externalPartnerGene, edge.isSubunitOfOtherComplex, and edge.otherComplexIds for the normalized explanation. edge.raw is retained only for source traceability."
         ],
     )
 
