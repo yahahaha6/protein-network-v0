@@ -10,6 +10,7 @@ It owns the standard complex_ext edge contract:
 
 from __future__ import annotations
 
+import ast
 from typing import Any, Optional
 
 from app.normalizers.evidence import normalize_evidence
@@ -66,6 +67,64 @@ def _clean_text_list(values: list[str]) -> list[str]:
             cleaned.append(text)
 
     return cleaned
+
+
+def _first_raw_complex_ext_value(
+    row: dict[str, Any],
+    keys: list[str],
+) -> Any:
+    """Return the first usable raw value while preserving list-like fields.
+
+    first_existing() is useful for scalar TSV fields, but list-like test inputs
+    or upstream normalized fields must not be stringified before splitting.
+    This helper is intentionally used for parallel list fields such as
+    mediating_subunit_ids and mediating_subunit_genes.
+    """
+
+    for key in keys:
+        if key not in row:
+            continue
+
+        value = row.get(key)
+
+        if isinstance(value, (list, tuple)):
+            if any(optional_complex_ext_text(item) is not None for item in value):
+                return value
+
+            continue
+
+        if optional_complex_ext_text(value) is not None:
+            return value
+
+    return None
+
+
+def _split_raw_complex_ext_list(value: Any) -> list[str]:
+    """Split raw list-like fields without destroying parallel ID/gene alignment.
+
+    For mediating_subunit_ids and mediating_subunit_genes, empty positions are
+    intentionally preserved so genes do not shift onto the wrong IDs.
+    """
+
+    if value is None:
+        return []
+
+    if isinstance(value, (list, tuple)):
+        return ["" if item is None else str(item).strip() for item in value]
+
+    if isinstance(value, str):
+        stripped = value.strip()
+
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                parsed = ast.literal_eval(stripped)
+            except (SyntaxError, ValueError):
+                parsed = None
+
+            if isinstance(parsed, (list, tuple)):
+                return ["" if item is None else str(item).strip() for item in parsed]
+
+    return split_list(value)
 
 
 def make_mediating_subunits(
@@ -199,14 +258,19 @@ def make_complex_ext_edge(
 ) -> VizEdge:
     """Build one normalized complex external interaction edge."""
 
-    raw_mediating_subunit_ids = split_list(
-        first_existing(row, ["mediating_subunit_ids", "mediating_ids"])
+    raw_mediating_subunit_ids = _split_raw_complex_ext_list(
+        _first_raw_complex_ext_value(row, ["mediating_subunit_ids", "mediating_ids"])
     )
-    raw_mediating_subunit_genes = split_list(
-        first_existing(row, ["mediating_subunit_genes", "mediating_genes"])
+    raw_mediating_subunit_genes = _split_raw_complex_ext_list(
+        _first_raw_complex_ext_value(
+            row,
+            ["mediating_subunit_genes", "mediating_genes"],
+        )
     )
     other_complex_ids = _clean_text_list(
-        split_list(first_existing(row, ["other_complex_ids", "other_complexes"]))
+        _split_raw_complex_ext_list(
+            _first_raw_complex_ext_value(row, ["other_complex_ids", "other_complexes"])
+        )
     )
 
     complex_name = optional_complex_ext_text(
