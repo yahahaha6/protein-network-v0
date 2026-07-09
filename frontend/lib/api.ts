@@ -1,3 +1,4 @@
+import type { MediatingSubunit } from "./networkTypes";
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -69,6 +70,11 @@ export type NetworkEdge = {
   hasStructuralEvidence?: boolean;
   isConfirmedPpi?: boolean;
   isCoComplexOnly?: boolean;
+  mediatingSubunits?: MediatingSubunit[];
+  externalPartnerId?: string | null;
+  externalPartnerGene?: string | null;
+  isSubunitOfOtherComplex?: boolean | null;
+  otherComplexIds?: string[];
   evidenceLevel?: string;
   evidenceSummary?: Record<string, unknown>;
   externalLinks?: Record<string, unknown>[];

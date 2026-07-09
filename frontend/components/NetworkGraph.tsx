@@ -1,5 +1,7 @@
 "use client";
 
+import type { MediatingSubunit } from "@/lib/networkTypes";
+
 import cytoscape from "cytoscape";
 import type { Core, EdgeSingular, ElementDefinition, LayoutOptions, NodeSingular } from "cytoscape";
 import { useRouter } from "next/navigation";
@@ -60,6 +62,11 @@ type StandardVizEdge = {
   hasStructuralEvidence?: boolean;
   isConfirmedPpi?: boolean;
   isCoComplexOnly?: boolean;
+  mediatingSubunits?: MediatingSubunit[];
+  externalPartnerId?: string | null;
+  externalPartnerGene?: string | null;
+  isSubunitOfOtherComplex?: boolean | null;
+  otherComplexIds?: string[];
   evidenceLevel?: string;
   evidenceSummary?: unknown;
   externalLinks?: unknown[];
