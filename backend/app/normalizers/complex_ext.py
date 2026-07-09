@@ -199,11 +199,11 @@ def make_complex_ext_edge(
 ) -> VizEdge:
     """Build one normalized complex external interaction edge."""
 
-    mediating_subunit_ids = _clean_text_list(
-        split_list(first_existing(row, ["mediating_subunit_ids", "mediating_ids"]))
+    raw_mediating_subunit_ids = split_list(
+        first_existing(row, ["mediating_subunit_ids", "mediating_ids"])
     )
-    mediating_subunit_genes = _clean_text_list(
-        split_list(first_existing(row, ["mediating_subunit_genes", "mediating_genes"]))
+    raw_mediating_subunit_genes = split_list(
+        first_existing(row, ["mediating_subunit_genes", "mediating_genes"])
     )
     other_complex_ids = _clean_text_list(
         split_list(first_existing(row, ["other_complex_ids", "other_complexes"]))
@@ -229,9 +229,13 @@ def make_complex_ext_edge(
     )
 
     mediating_subunits = make_mediating_subunits(
-        ids=mediating_subunit_ids,
-        genes=mediating_subunit_genes,
+        ids=raw_mediating_subunit_ids,
+        genes=raw_mediating_subunit_genes,
     )
+    mediating_subunit_ids = [subunit.id for subunit in mediating_subunits]
+    mediating_subunit_genes = [
+        subunit.gene for subunit in mediating_subunits if subunit.gene is not None
+    ]
 
     edge_raw = {
         **row,
