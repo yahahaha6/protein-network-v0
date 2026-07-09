@@ -1,6 +1,6 @@
 "use client";
 
-import type { MediatingSubunit } from "@/lib/networkTypes";
+import type { ComplexExternalEdgeFields } from "@/lib/networkTypes";
 
 import cytoscape from "cytoscape";
 import type { Core, EdgeSingular, ElementDefinition, LayoutOptions, NodeSingular } from "cytoscape";
@@ -44,7 +44,7 @@ type StandardVizNode = {
   raw?: DetailRecord;
 };
 
-type StandardVizEdge = {
+type StandardVizEdge = ComplexExternalEdgeFields & {
   id: string;
   source: string;
   target: string;
@@ -62,11 +62,6 @@ type StandardVizEdge = {
   hasStructuralEvidence?: boolean;
   isConfirmedPpi?: boolean;
   isCoComplexOnly?: boolean;
-  mediatingSubunits?: MediatingSubunit[];
-  externalPartnerId?: string | null;
-  externalPartnerGene?: string | null;
-  isSubunitOfOtherComplex?: boolean | null;
-  otherComplexIds?: string[];
   evidenceLevel?: string;
   evidenceSummary?: unknown;
   externalLinks?: unknown[];
