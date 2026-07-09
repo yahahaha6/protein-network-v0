@@ -7,6 +7,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import DetailFields from "./DetailFields";
 import ExpressionProfileCard from "./ExpressionProfileCard";
 import NetworkAttributeTable from "./NetworkAttributeTable";
+import {
+  getEdgeSemanticModel,
+  getNetworkSemanticProfile,
+} from "@/lib/networkSemantics";
+import {
+  formatCompactDetailValue,
+  toDetailListPreview,
+} from "@/lib/detailPresentation";
+import {
+  getEdgeLegendItems,
+  getEdgePresentationClasses,
+  MANAGED_EDGE_PRESENTATION_CLASSES,
+} from "@/lib/networkPresentation";
 
 type DetailRecord = Record<string, unknown>;
 
@@ -469,39 +482,6 @@ function buildEdgeDetailData(edgeData: DetailRecord): DetailRecord {
 }
 
 
-function toDisplayList(value: unknown): string[] {
-  if (value === null || value === undefined || value === "") {
-    return [];
-  }
-
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => toDisplayList(item));
-  }
-
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-
-    if (record.label || record.url) {
-      return [String(record.label || record.url)];
-    }
-
-    return [JSON.stringify(record)];
-  }
-
-  const text = String(value).trim();
-
-  if (
-    !text ||
-    ["nan", "none", "null", "undefined", "n/a", "na", "[]"].includes(
-      text.toLowerCase()
-    )
-  ) {
-    return [];
-  }
-
-  return [text];
-}
-
 function toExternalLinks(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -513,20 +493,28 @@ function toExternalLinks(value: unknown) {
 }
 
 function renderValueList(value: unknown, emptyLabel = "None") {
-  const items = toDisplayList(value);
+  const preview = toDetailListPreview(value, { maxItems: 12 });
 
-  if (items.length === 0) {
+  if (preview.items.length === 0) {
     return <span className="text-slate-500">{emptyLabel}</span>;
   }
 
   return (
-    <ul className="space-y-1">
-      {items.map((item, index) => (
-        <li key={`${item}-${index}`} className="break-words text-slate-200">
-          {item}
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-2">
+      <ul className="space-y-1">
+        {preview.items.map((item, index) => (
+          <li key={`${item}-${index}`} className="break-words text-slate-200">
+            {item}
+          </li>
+        ))}
+      </ul>
+
+      {preview.hiddenCount > 0 && (
+        <p className="text-xs font-medium text-slate-500">
+          + {preview.hiddenCount} more
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -555,9 +543,15 @@ function renderExternalLinks(value: unknown) {
   );
 }
 
-function renderStatusBadge(active: boolean, activeLabel: string, inactiveLabel: string) {
+function renderStatusBadge(
+  active: boolean,
+  activeLabel: string,
+  inactiveLabel: string,
+  key?: string
+) {
   return (
     <span
+      key={key}
       className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-xs font-semibold ${
         active
           ? "border-emerald-700 bg-emerald-950/40 text-emerald-300"
@@ -655,63 +649,7 @@ function getEdgeTitle(edgeData: DetailRecord) {
   return `${source} → ${target}`;
 }
 function formatSummaryValue(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return "N/A";
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return "N/A";
-    }
-
-    return value
-      .map((item) =>
-        typeof item === "object" && item !== null
-          ? JSON.stringify(item)
-          : String(item)
-      )
-      .join(", ");
-  }
-
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-
-  return String(value);
-}
-function hasEvidenceValue(value: unknown): boolean {
-  if (value === null || value === undefined) {
-    return false;
-  }
-
-  if (Array.isArray(value)) {
-    return value.some((item) => hasEvidenceValue(item));
-  }
-
-  if (typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>).length > 0;
-  }
-
-  const normalized = String(value).trim().toLowerCase();
-
-  return ![
-    "",
-    "0",
-    "false",
-    "no",
-    "none",
-    "null",
-    "undefined",
-    "n/a",
-    "na",
-    "nan",
-    "[]",
-    "{}",
-  ].includes(normalized);
-}
-
-function edgeHasAnyEvidenceField(data: DetailRecord, keys: string[]) {
-  return keys.some((key) => hasEvidenceValue(data[key]));
+  return formatCompactDetailValue(value);
 }
 const DEFAULT_EVIDENCE_SOURCE_FILTERS = [
   "BioGRID",
@@ -835,94 +773,19 @@ function nodeMatchesFocus(node: ElementDefinition, focusNodeId?: string) {
 
   return idsMatch(id, focusNodeId) || idsMatch(label, focusNodeId);
 }
-function applyEdgeEvidenceClasses(cy: Core) {
+function applyEdgeEvidenceClasses(cy: Core, graphType?: string) {
+  const semanticProfile = getNetworkSemanticProfile(graphType);
+  const managedClasses = MANAGED_EDGE_PRESENTATION_CLASSES.join(" ");
+
   cy.edges().forEach((edge) => {
     const edgeData = edge.data() as DetailRecord;
+    const semanticModel = getEdgeSemanticModel(edgeData, semanticProfile);
+    const presentationClasses = getEdgePresentationClasses(semanticModel);
 
-    const hasDdi = edgeHasAnyEvidenceField(edgeData, [
-      "hasDDI",
-      "ddi",
-      "DDI",
-      "domain_domain_interactions",
-      "domainDomainInteractions",
-    ]);
+    edge.removeClass(managedClasses);
 
-    const hasDmi = edgeHasAnyEvidenceField(edgeData, [
-      "hasDMI",
-      "dmi",
-      "DMI",
-      "domain_motif_interactions",
-      "domainMotifInteractions",
-    ]);
-
-    const hasStructuralEvidence = edgeHasAnyEvidenceField(edgeData, [
-      "hasStructuralEvidence",
-      "supportingStructures",
-      "supporting_structures",
-      "pdb",
-      "pdbIds",
-      "pdb_ids",
-    ]);
-
-    const isConfirmedPpi = edgeHasAnyEvidenceField(edgeData, [
-      "isConfirmedPpi",
-      "is_confirmed_ppi",
-    ]);
-
-    const evidenceLevel = String(edgeData.evidenceLevel || "").toLowerCase();
-
-    const isCoComplexOnly =
-      edgeHasAnyEvidenceField(edgeData, [
-        "isCoComplexOnly",
-        "is_co_complex_only",
-      ]) || evidenceLevel === "co_complex_only";
-
-    edge.removeClass(
-      [
-        "has-ddi",
-        "has-dmi",
-        "has-ddi-dmi",
-        "has-structural-evidence",
-        "confirmed-ppi",
-        "co-complex-only",
-        "evidence-high",
-        "evidence-medium",
-        "evidence-low",
-        "evidence-unknown",
-        "evidence-co-complex-only",
-      ].join(" ")
-    );
-
-    if (hasDdi) {
-      edge.addClass("has-ddi");
-    }
-
-    if (hasDmi) {
-      edge.addClass("has-dmi");
-    }
-
-    if (hasDdi && hasDmi) {
-      edge.addClass("has-ddi-dmi");
-    }
-
-    if (hasStructuralEvidence) {
-      edge.addClass("has-structural-evidence");
-    }
-
-    if (isConfirmedPpi) {
-      edge.addClass("confirmed-ppi");
-    }
-
-    if (isCoComplexOnly) {
-      edge.addClass("co-complex-only");
-    }
-
-    if (
-      ["high", "medium", "low", "unknown", "co_complex_only"].includes(
-        evidenceLevel
-      )
-    ) {
-      edge.addClass(`evidence-${evidenceLevel.replace(/_/g, "-")}`);
+    if (presentationClasses.length > 0) {
+      edge.addClass(presentationClasses.join(" "));
     }
   });
 }
@@ -1115,6 +978,42 @@ const networkStyle = [
     },
   },
   {
+    selector: "edge.edge-role-complex-ext-base",
+    style: {
+      width: 2.2,
+      "line-color": "#38bdf8",
+      "line-style": "solid",
+      opacity: 0.9,
+    },
+  },
+  {
+    selector: "edge.edge-role-complex-ext-other-complex",
+    style: {
+      width: 3.2,
+      "line-color": "#a855f7",
+      "line-style": "dashed",
+      opacity: 0.95,
+    },
+  },
+  {
+    selector: "edge.edge-role-complex-ext-structural",
+    style: {
+      width: 5,
+      "line-color": "#f59e0b",
+      "line-style": "solid",
+      opacity: 1,
+    },
+  },
+  {
+    selector: "edge.edge-role-complex-ext-structural-other-complex",
+    style: {
+      width: 5,
+      "line-color": "#f97316",
+      "line-style": "dashed",
+      opacity: 1,
+    },
+  },
+  {
     selector: "edge:selected",
     style: {
       width: 5,
@@ -1288,13 +1187,27 @@ export default function NetworkGraph({
     );
   }
 
+  const graphType =
+    typeof (elements as { graphType?: unknown }).graphType === "string"
+      ? String((elements as { graphType?: unknown }).graphType)
+      : undefined;
+
+  const semanticProfile = getNetworkSemanticProfile(graphType);
+  const edgeLegendItems = getEdgeLegendItems(semanticProfile);
+
   const selectedNodeData =
     selectedElement?.kind === "node" ? selectedElement.data : null;
 
-  const selectedEdgeData =
-    selectedElement?.kind === "edge"
-      ? buildEdgeDetailData(selectedElement.data)
-      : null;
+  const selectedEdgeOriginalData =
+    selectedElement?.kind === "edge" ? selectedElement.data : null;
+
+  const selectedEdgeData = selectedEdgeOriginalData
+    ? buildEdgeDetailData(selectedEdgeOriginalData)
+    : null;
+
+  const selectedEdgeSemanticModel = selectedEdgeOriginalData
+    ? getEdgeSemanticModel(selectedEdgeOriginalData, semanticProfile)
+    : null;
 
   const selectedNodeHref = selectedNodeData
   ? getNodeHref(selectedNodeData, nodeNavigationMode)
@@ -1404,7 +1317,6 @@ export default function NetworkGraph({
 
         cyRef.current = cy;
 
-    applyEdgeEvidenceClasses(cy);
 
     if (showEdgeLabels) {
       cy.edges().addClass("show-label");
@@ -1465,6 +1377,16 @@ export default function NetworkGraph({
       cyRef.current = null;
     };
     }, [filteredElements, focusNodeId, layoutName, showEdgeLabels]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+
+    if (!cy) {
+      return;
+    }
+
+    applyEdgeEvidenceClasses(cy, graphType);
+  }, [filteredElements, graphType]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -1598,43 +1520,17 @@ export default function NetworkGraph({
         </div>
                 <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
           <span className="font-semibold uppercase tracking-wide text-slate-500">
-            Edge legend
+            {semanticProfile.graphKind === "complex_ext"
+              ? "Complex external edge legend"
+              : "Edge legend"}
           </span>
 
-          <span className="inline-flex items-center gap-2">
-            <span className="h-1 w-8 rounded-full bg-pink-500" />
-            DDI evidence
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-1 w-8 rounded-full bg-violet-500" />
-            DMI evidence
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-1.5 w-8 rounded-full bg-yellow-400" />
-            DDI + DMI
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-2 w-8 rounded-full bg-slate-200" />
-            Structural / PDB evidence
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-1.5 w-8 rounded-full bg-slate-300" />
-            High evidence
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-1 w-8 rounded-full bg-sky-400" />
-            Direct PPI
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-1 w-8 border-t border-dashed border-orange-400" />
-            Co-complex only
-          </span>
+          {edgeLegendItems.map((item) => (
+            <span key={item.key} className="inline-flex items-center gap-2">
+              <span className={item.swatchClassName} />
+              {item.label}
+            </span>
+          ))}
         </div>
                 <NetworkAttributeTable
           nodes={filteredElements.nodes}
@@ -1642,7 +1538,7 @@ export default function NetworkGraph({
         />
       </section>
 
-      <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl">
+      <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
         <h2 className="text-lg font-semibold text-slate-100">
           {selectedElement?.kind === "edge" ? "Edge Detail" : "Node Detail"}
         </h2>
@@ -1752,20 +1648,94 @@ export default function NetworkGraph({
                 </div>
 
                 <div className="flex flex-wrap gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  {renderStatusBadge(
-                    Boolean(selectedEdgeData.isConfirmedPpi),
-                    "Confirmed direct PPI",
-                    "Not confirmed direct PPI"
-                  )}
-
-                  {renderStatusBadge(
-                    Boolean(selectedEdgeData.isCoComplexOnly),
-                    "Co-complex only",
-                    "Not co-complex only"
+                  {selectedEdgeSemanticModel?.statusBadges.map((badge) =>
+                    renderStatusBadge(
+                      badge.active,
+                      badge.activeLabel,
+                      badge.inactiveLabel,
+                      badge.key
+                    )
                   )}
                 </div>
               </div>
             </div>
+
+            {selectedEdgeSemanticModel?.complexExternalExplanation && (
+              <div className="rounded-xl border border-purple-900/70 bg-purple-950/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-purple-300">
+                  Complex External Explanation
+                </p>
+
+                <div className="mt-3 grid gap-3 text-sm">
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      External Partner Gene
+                    </p>
+                    <p className="mt-1 break-words font-medium text-slate-200">
+                      {formatSummaryValue(
+                        selectedEdgeSemanticModel.complexExternalExplanation
+                          .externalPartnerGene
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Mediating Subunit Count
+                    </p>
+                    <p className="mt-1 break-words font-medium text-slate-200">
+                      {formatSummaryValue(
+                        selectedEdgeSemanticModel.complexExternalExplanation
+                          .nMediatingSubunits
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Mediating Subunit IDs
+                    </p>
+                    <div className="mt-2">
+                      {renderValueList(
+                        selectedEdgeSemanticModel.complexExternalExplanation
+                          .mediatingSubunitIds,
+                        "No mediating subunit IDs"
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Mediating Subunit Genes
+                    </p>
+                    <div className="mt-2">
+                      {renderValueList(
+                        selectedEdgeSemanticModel.complexExternalExplanation
+                          .mediatingSubunitGenes,
+                        "No mediating subunit genes"
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="mb-2">
+                      {renderStatusBadge(
+                        selectedEdgeSemanticModel.complexExternalExplanation
+                          .isSubunitOfOtherComplex,
+                        "Partner is in other complexes",
+                        "Partner not marked in other complexes"
+                      )}
+                    </div>
+
+                    {renderValueList(
+                      selectedEdgeSemanticModel.complexExternalExplanation
+                        .otherComplexIds,
+                      "No other complex IDs"
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="rounded-xl border border-pink-900/70 bg-pink-950/10 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-pink-300">

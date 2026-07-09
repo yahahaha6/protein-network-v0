@@ -1,209 +1,282 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
+
+import {
+  formatCompactDetailValue,
+  isEmptyDetailValue,
+} from "@/lib/detailPresentation";
+
+type DetailRecord = Record<string, unknown>;
 
 type DetailFieldsProps = {
   title: string;
-  data: Record<string, unknown>;
+  data: DetailRecord;
 };
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+const LIST_PREVIEW_LIMIT = 12;
+const LONG_TEXT_LIMIT = 220;
+const OBJECT_PREVIEW_LIMIT = 6;
+
+function isRecord(value: unknown): value is DetailRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function formatKey(key: string) {
+function formatFieldLabel(key: string): string {
   return key
-    .replaceAll("_", " ")
-    .replaceAll("-", " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-function normalizeToken(value: string) {
-  return value.trim().replace(/^["'([{]+|["')\]}.,;:]+$/g, "");
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim()
+    .toUpperCase();
 }
 
-function isLikelyUniprotId(value: string) {
-  return /^[OPQ][0-9][A-Z0-9]{3}[0-9]$/.test(value) || /^[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]$/.test(value);
-}
+function isDelimitedListField(key: string, value: string): boolean {
+  const normalizedKey = key.toLowerCase();
 
-function isLikelyPmid(value: string) {
-  return /^[1-9][0-9]{5,8}$/.test(value);
-}
-
-function isLikelyPdbId(value: string) {
-  return /^[0-9][A-Za-z0-9]{3}$/.test(value);
-}
-
-function externalLinkForToken(token: string) {
-  const cleaned = normalizeToken(token);
-
-  if (!cleaned) {
-    return null;
+  if (!/[;,|]/.test(value)) {
+    return false;
   }
 
-  if (cleaned.toLowerCase().startsWith("pmid:")) {
-    const pmid = cleaned.slice(5);
-    return {
-      label: cleaned,
-      href: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
-      type: "PubMed",
-    };
+  return (
+    normalizedKey.includes("ids") ||
+    normalizedKey.includes("idlist") ||
+    normalizedKey.includes("complex") ||
+    normalizedKey.includes("publication") ||
+    normalizedKey.includes("pubmed") ||
+    normalizedKey.includes("sources") ||
+    normalizedKey.includes("methods")
+  );
+}
+
+function splitDelimitedList(value: string): string[] {
+  return value
+    .split(/[;,|]/)
+    .map((item) => item.trim())
+    .filter((item) => !isEmptyDetailValue(item));
+}
+
+function toFieldListItems(key: string, value: unknown): unknown[] | null {
+  if (Array.isArray(value)) {
+    const meaningfulItems = value.filter((item) => !isEmptyDetailValue(item));
+    return meaningfulItems.length > 0 ? meaningfulItems : null;
   }
 
-  if (isLikelyUniprotId(cleaned)) {
-    return {
-      label: cleaned,
-      href: `https://www.uniprot.org/uniprotkb/${cleaned}/entry`,
-      type: "UniProt",
-    };
-  }
-
-  if (isLikelyPdbId(cleaned)) {
-    return {
-      label: cleaned.toUpperCase(),
-      href: `https://www.rcsb.org/structure/${cleaned.toUpperCase()}`,
-      type: "RCSB PDB",
-    };
-  }
-
-  if (isLikelyPmid(cleaned)) {
-    return {
-      label: cleaned,
-      href: `https://pubmed.ncbi.nlm.nih.gov/${cleaned}/`,
-      type: "PubMed",
-    };
+  if (typeof value === "string" && isDelimitedListField(key, value)) {
+    const items = splitDelimitedList(value);
+    return items.length > 1 ? items : null;
   }
 
   return null;
 }
 
-function renderExternalToken(token: string): ReactNode {
-  const link = externalLinkForToken(token);
+function sortEntries(entries: [string, unknown][]) {
+  const noisyKeys = new Set(["raw", "metadata", "debug"]);
 
-  if (!link) {
-    return token;
-  }
+  return [...entries].sort(([leftKey], [rightKey]) => {
+    const leftNoisy = noisyKeys.has(leftKey);
+    const rightNoisy = noisyKeys.has(rightKey);
 
-  return (
-    <a
-      href={link.href}
-      target="_blank"
-      rel="noreferrer"
-      className="font-semibold text-cyan-300 underline decoration-cyan-700 underline-offset-2 hover:text-cyan-100"
-      title={`Open ${link.type}`}
-    >
-      {link.label}
-    </a>
-  );
-}
-
-function renderLinkedText(value: string): ReactNode {
-  const parts = value.split(/(\s+|[,;|])/g);
-
-  return (
-    <>
-      {parts.map((part, index) => {
-        if (/^(\s+|[,;|])$/.test(part)) {
-          return part;
-        }
-
-        return <span key={`${part}-${index}`}>{renderExternalToken(part)}</span>;
-      })}
-    </>
-  );
-}
-
-function renderValue(value: unknown): ReactNode {
-  if (value === null || value === undefined || value === "") {
-    return <span className="text-slate-500">N/A</span>;
-  }
-
-    if (typeof value === "string") {
-    return <span>{renderLinkedText(value)}</span>;
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return <span>{String(value)}</span>;
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return <span className="text-slate-500">N/A</span>;
+    if (leftNoisy !== rightNoisy) {
+      return leftNoisy ? 1 : -1;
     }
 
-    return (
-      <div className="space-y-3">
-        {value.map((item, index) => (
-          <div
-            key={index}
-            className="rounded-xl border border-slate-800 bg-slate-950/70 p-3"
-          >
-            {isPlainObject(item) ? (
-              <div className="space-y-2">
-                {Object.entries(item).map(([itemKey, itemValue]) => (
-                  <div key={itemKey} className="grid gap-1 sm:grid-cols-4">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {formatKey(itemKey)}
-                    </div>
+    return leftKey.localeCompare(rightKey);
+  });
+}
 
-                    <div className="whitespace-pre-wrap break-words text-sm text-slate-200 sm:col-span-3">
-                      {renderValue(itemValue)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="whitespace-pre-wrap break-words text-sm text-slate-200">
-                {renderValue(item)}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+function getVisibleEntries(data: DetailRecord) {
+  return sortEntries(
+    Object.entries(data).filter(([, value]) => !isEmptyDetailValue(value))
+  );
+}
+
+function renderLinkedListItem(key: string, value: unknown): ReactNode {
+  const text = formatCompactDetailValue(value, {
+    maxItems: 4,
+    maxObjectFields: 4,
+    maxTextLength: 120,
+  });
+
+  const normalizedKey = key.toLowerCase();
+  const cleanText = text.replace(/^CORUM:/i, "").replace(/^UniProt:/i, "");
+
+  if (normalizedKey.includes("complex") && /^[0-9]+$/.test(cleanText)) {
+    return (
+      <Link
+        href={`/complex/${cleanText}`}
+        className="text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline"
+      >
+        {cleanText}
+      </Link>
     );
   }
 
-  if (isPlainObject(value)) {
+  if (/^[A-Z0-9]{6,10}$/.test(cleanText)) {
     return (
-      <div className="space-y-2">
-        {Object.entries(value).map(([nestedKey, nestedValue]) => (
-          <div
-            key={nestedKey}
-            className="rounded-xl border border-slate-800 bg-slate-950/70 p-3"
-          >
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              {formatKey(nestedKey)}
-            </div>
-
-            <div className="whitespace-pre-wrap break-words text-sm text-slate-200">
-              {renderValue(nestedValue)}
-            </div>
-          </div>
-        ))}
-      </div>
+      <Link
+        href={`/protein/${cleanText}`}
+        className="text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline"
+      >
+        {cleanText}
+      </Link>
     );
   }
 
-  return <span>{String(value)}</span>;
+  return text;
+}
+
+function renderListField(key: string, items: unknown[]) {
+  const meaningfulItems = items.filter((item) => !isEmptyDetailValue(item));
+  const visibleItems = meaningfulItems.slice(0, LIST_PREVIEW_LIMIT);
+  const hiddenItems = meaningfulItems.slice(LIST_PREVIEW_LIMIT);
+
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-2">
+        {visibleItems.map((item, index) => (
+          <div
+            key={`${key}-${index}-${String(item)}`}
+            className="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-sm text-slate-200"
+          >
+            {renderLinkedListItem(key, item)}
+          </div>
+        ))}
+      </div>
+
+      {hiddenItems.length > 0 && (
+        <details className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-200">
+            Show remaining {hiddenItems.length} of {meaningfulItems.length}
+          </summary>
+
+          <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto pr-1">
+            {hiddenItems.map((item, index) => (
+              <div
+                key={`${key}-hidden-${index}-${String(item)}`}
+                className="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-sm text-slate-200"
+              >
+                {renderLinkedListItem(key, item)}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function renderObjectField(value: DetailRecord) {
+  const entries = getVisibleEntries(value);
+  const visibleEntries = entries.slice(0, OBJECT_PREVIEW_LIMIT);
+  const hiddenCount = Math.max(entries.length - visibleEntries.length, 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-2">
+        {visibleEntries.map(([entryKey, entryValue]) => (
+          <div
+            key={entryKey}
+            className="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-sm"
+          >
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              {formatFieldLabel(entryKey)}
+            </p>
+            <p className="mt-1 break-words text-slate-200">
+              {formatCompactDetailValue(entryValue, {
+                maxItems: 6,
+                maxObjectFields: 3,
+                maxTextLength: 120,
+              })}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {hiddenCount > 0 && (
+        <details className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-200">
+            Show full object with {entries.length} fields
+          </summary>
+
+          <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-3 text-xs text-slate-300">
+            {JSON.stringify(value, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function renderTextField(value: string) {
+  const trimmed = value.trim();
+
+  if (trimmed.length <= LONG_TEXT_LIMIT) {
+    return <p className="break-words text-sm text-slate-200">{trimmed}</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="break-words text-sm text-slate-200">
+        {trimmed.slice(0, LONG_TEXT_LIMIT).trimEnd()}…
+      </p>
+
+      <details className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+        <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-200">
+          Show full text
+        </summary>
+        <p className="mt-3 whitespace-pre-wrap break-words text-sm text-slate-200">
+          {trimmed}
+        </p>
+      </details>
+    </div>
+  );
+}
+
+function renderFieldValue(key: string, value: unknown) {
+  const listItems = toFieldListItems(key, value);
+
+  if (listItems) {
+    return renderListField(key, listItems);
+  }
+
+  if (typeof value === "string") {
+    return renderTextField(value);
+  }
+
+  if (isRecord(value)) {
+    return renderObjectField(value);
+  }
+
+  return (
+    <p className="break-words text-sm text-slate-200">
+      {formatCompactDetailValue(value)}
+    </p>
+  );
 }
 
 export default function DetailFields({ title, data }: DetailFieldsProps) {
-  const entries = Object.entries(data);
+  const entries = getVisibleEntries(data);
+
+  if (entries.length === 0) {
+    return null;
+  }
 
   return (
-    <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-      <h2 className="mb-4 text-xl font-semibold">{title}</h2>
+    <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
+        {title}
+      </p>
 
-      <div className="space-y-4">
+      <div className="mt-3 grid gap-3">
         {entries.map(([key, value]) => (
           <div
             key={key}
-            className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"
+            className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"
           >
-            <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-cyan-300">
-              {formatKey(key)}
-            </div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {formatFieldLabel(key)}
+            </p>
 
-            <div className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-100">
-              {renderValue(value)}
-            </div>
+            <div className="mt-2">{renderFieldValue(key, value)}</div>
           </div>
         ))}
       </div>

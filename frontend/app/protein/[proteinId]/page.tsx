@@ -21,6 +21,14 @@ function getProteinTitle(protein: DetailRecord, proteinId: string) {
   return possibleTitle ? String(possibleTitle) : proteinId;
 }
 
+function asRecord(value: unknown): DetailRecord | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as DetailRecord;
+  }
+
+  return null;
+}
+
 export default async function ProteinDetailPage({ params }: ProteinPageProps) {
   const { proteinId } = await params;
 
@@ -56,6 +64,7 @@ export default async function ProteinDetailPage({ params }: ProteinPageProps) {
   }
 
   const title = getProteinTitle(protein, proteinId);
+  const hpaProfile = asRecord(protein.hpaProfile);
 
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
@@ -90,7 +99,7 @@ export default async function ProteinDetailPage({ params }: ProteinPageProps) {
           </div>
         </section>
 
-        <ExpressionProfileCard data={protein} />
+        <ExpressionProfileCard data={hpaProfile} />
 
 <DetailFields title="Protein detail fields" data={protein} />
       </div>

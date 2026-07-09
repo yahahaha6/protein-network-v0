@@ -122,6 +122,15 @@ export type ComplexIntraFilters = {
   has_pdb?: boolean;
 };
 
+export type ComplexExtFilters = {
+  source?: string;
+  protein_category?: string;
+  has_ddi?: boolean;
+  has_dmi?: boolean;
+  has_pdb?: boolean;
+  is_subunit_of_other_complex?: boolean;
+};
+
 export type GlobalPpiNeighborFilters = {
   source?: string;
   protein_category?: string;
@@ -313,10 +322,43 @@ export async function getComplexIntraNetwork(
 export async function getComplexExtNetwork(
   complexId: string,
   limit = 20,
-  offset = 0
+  offset = 0,
+  filters: ComplexExtFilters = {}
 ) {
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+
+  if (filters.source) {
+    query.set("source", filters.source);
+  }
+
+  if (filters.protein_category) {
+    query.set("protein_category", filters.protein_category);
+  }
+
+  if (typeof filters.has_ddi === "boolean") {
+    query.set("has_ddi", String(filters.has_ddi));
+  }
+
+  if (typeof filters.has_dmi === "boolean") {
+    query.set("has_dmi", String(filters.has_dmi));
+  }
+
+  if (typeof filters.has_pdb === "boolean") {
+    query.set("has_pdb", String(filters.has_pdb));
+  }
+
+  if (typeof filters.is_subunit_of_other_complex === "boolean") {
+    query.set(
+      "is_subunit_of_other_complex",
+      String(filters.is_subunit_of_other_complex)
+    );
+  }
+
   return fetchJson<NetworkResponse>(
-    `${API_BASE_URL}/api/complex/${complexId}/ext?limit=${limit}&offset=${offset}`
+    `${API_BASE_URL}/api/complex/${complexId}/ext?${query.toString()}`
   );
 }
 

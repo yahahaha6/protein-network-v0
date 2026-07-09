@@ -1,3 +1,8 @@
+import {
+  formatCompactDetailValue,
+  isEmptyDetailValue,
+} from "@/lib/detailPresentation";
+
 type ExpressionProfileCardProps = {
   data: Record<string, unknown> | null | undefined;
   compact?: boolean;
@@ -42,17 +47,6 @@ const HPA_FIELDS: HpaField[] = [
   },
 ];
 
-function isEmptyValue(value: unknown) {
-  return (
-    value === null ||
-    value === undefined ||
-    value === "" ||
-    value === "nan" ||
-    value === "NaN" ||
-    (Array.isArray(value) && value.length === 0)
-  );
-}
-
 function firstAvailableValue(
   data: Record<string, unknown> | null | undefined,
   keys: string[]
@@ -64,7 +58,7 @@ function firstAvailableValue(
   for (const key of keys) {
     const value = data[key];
 
-    if (!isEmptyValue(value)) {
+    if (!isEmptyDetailValue(value)) {
       return value;
     }
   }
@@ -72,35 +66,14 @@ function firstAvailableValue(
   return undefined;
 }
 
-function renderValue(value: unknown) {
-  if (isEmptyValue(value)) {
-    return <span className="text-slate-500">N/A</span>;
-  }
-
-  if (Array.isArray(value)) {
-    return (
-      <ul className="space-y-1">
-        {value.map((item, index) => (
-          <li key={`${String(item)}-${index}`}>{String(item)}</li>
-        ))}
-      </ul>
-    );
-  }
-
-  if (typeof value === "object") {
-    return JSON.stringify(value, null, 2);
-  }
-
-  return String(value);
-}
-
 export default function ExpressionProfileCard({
   data,
   compact = false,
 }: ExpressionProfileCardProps) {
-  const hasAnyHpaField = HPA_FIELDS.some(
-    (field) => !isEmptyValue(firstAvailableValue(data, field.keys))
-  );
+  const availableHpaFields = HPA_FIELDS.map((field) => ({
+    ...field,
+    value: firstAvailableValue(data, field.keys),
+  })).filter((field) => !isEmptyDetailValue(field.value));
 
   return (
     <section
@@ -131,34 +104,30 @@ export default function ExpressionProfileCard({
         </div>
       </div>
 
-      {!hasAnyHpaField ? (
+      {availableHpaFields.length === 0 ? (
         <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-400">
           No structured HPA expression profile fields were found for this protein.
         </div>
       ) : (
         <div className={compact ? "grid gap-3" : "grid gap-4 md:grid-cols-2"}>
-          {HPA_FIELDS.map((field) => {
-            const value = firstAvailableValue(data, field.keys);
-
-            return (
-              <div
-                key={field.keys[0]}
-                className="rounded-xl border border-slate-800 bg-slate-950/70 p-4"
-              >
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {field.label}
-                </div>
-
-                <div className="whitespace-pre-wrap break-words text-sm font-semibold leading-6 text-slate-100">
-                  {renderValue(value)}
-                </div>
-
-                <p className="mt-3 text-xs leading-5 text-slate-500">
-                  {field.description}
-                </p>
+          {availableHpaFields.map((field) => (
+            <div
+              key={field.keys[0]}
+              className="rounded-xl border border-slate-800 bg-slate-950/70 p-4"
+            >
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {field.label}
               </div>
-            );
-          })}
+
+              <div className="whitespace-pre-wrap break-words text-sm font-semibold leading-6 text-slate-100">
+                {formatCompactDetailValue(field.value)}
+              </div>
+
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                {field.description}
+              </p>
+            </div>
+          ))}
         </div>
       )}
     </section>

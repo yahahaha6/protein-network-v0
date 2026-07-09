@@ -317,23 +317,32 @@ def get_protein(uniprot_ac: str):
     member_complexes = find_member_complexes(uniprot_ac)
     external_complexes = find_external_complexes(uniprot_ac)
 
+    normalized_protein = normalize_protein_node(
+        _protein_raw_for_normalizer(uniprot_ac, row)
+    )
+
     gene_symbol = first_existing(row, ["gene_symbol", "gene", "ext_gene_name", "gene_name"])
     protein_name = first_existing(row, ["protein_name", "name", "recommended_name"])
+    summary = {
+        "uniprotAc": uniprot_ac,
+        "geneSymbol": gene_symbol,
+        "proteinName": protein_name,
+        "proteinCategory": first_existing(row, ["protein_category", "category"]),
+        "ensemblId": first_existing(row, ["ensembl_id", "ensembl"]),
+        "hgncId": first_existing(row, ["hgnc_id", "hgnc"]),
+        "sequenceLength": first_existing(row, ["sequence_length", "length"]),
+    }
 
     return {
         "id": uniprot_ac,
         "key": protein_key(uniprot_ac),
         "type": "protein",
         "label": gene_symbol if gene_symbol != "暂无数据" else uniprot_ac,
-        "summary": {
-            "uniprotAc": uniprot_ac,
-            "geneSymbol": gene_symbol,
-            "proteinName": protein_name,
-            "proteinCategory": first_existing(row, ["protein_category", "category"]),
-            "ensemblId": first_existing(row, ["ensembl_id", "ensembl"]),
-            "hgncId": first_existing(row, ["hgnc_id", "hgnc"]),
-            "sequenceLength": first_existing(row, ["sequence_length", "length"]),
-        },
+        "summary": summary,
+        "hpaProfile": normalized_protein.hpaProfile.model_dump()
+        if normalized_protein.hpaProfile
+        else None,
+        "raw": normalized_protein.raw,
         "sections": [
             {
                 "id": "member_complexes",
