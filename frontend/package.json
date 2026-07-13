@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:network-semantics": "vitest run tests/complexExternalSemantics.test.ts"
+    "test:network-semantics": "vitest run tests/*Semantics.test.ts"
   },
   "dependencies": {
     "cytoscape": "^3.34.0",
