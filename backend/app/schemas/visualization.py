@@ -13,9 +13,9 @@ Important design rule:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt, model_validator
 
 
 GraphType = Literal[
@@ -60,6 +60,8 @@ ExternalLinkType = Literal[
     "other",
 ]
 
+NonNegativeCount = Annotated[StrictInt, Field(ge=0)]
+
 
 class ExternalLink(BaseModel):
     """A normalized external identifier link rendered directly by the frontend."""
@@ -99,14 +101,14 @@ class HpaProfile(BaseModel):
 class EvidenceSummary(BaseModel):
     """Computed evidence summary for one interaction edge."""
 
-    sourceCount: int = 0
-    methodCount: int = 0
-    publicationCount: int = 0
-    structureCount: int = 0
-    goldRecordCount: int = 0
+    sourceCount: Optional[NonNegativeCount] = None
+    methodCount: Optional[NonNegativeCount] = None
+    publicationCount: Optional[NonNegativeCount] = None
+    structureCount: Optional[NonNegativeCount] = None
+    ddiRecordCount: Optional[NonNegativeCount] = None
+    dmiRecordCount: Optional[NonNegativeCount] = None
+    goldRecordCount: Optional[NonNegativeCount] = None
 
-    hasDDI: bool = False
-    hasDMI: bool = False
     hasPDB: bool = False
     hasStructuralEvidence: bool = False
 
@@ -142,6 +144,36 @@ class VizNode(BaseModel):
     complexNames: List[str] = Field(default_factory=list)
 
     raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+def validate_feature_support(
+    *,
+    feature_name: str,
+    is_supported: bool,
+    reported_count: Optional[int],
+    details: List[str],
+) -> None:
+    """Enforce the shared DDI/DMI count, detail, and support invariants."""
+
+    detail_count = len(details)
+
+    if reported_count == 0 and detail_count > 0:
+        raise ValueError(f"{feature_name} count=0 conflicts with non-empty details")
+
+    if reported_count is not None and reported_count < detail_count:
+        raise ValueError(
+            f"{feature_name} reported count is smaller than normalized details"
+        )
+
+    expected_support = detail_count > 0 or (
+        reported_count is not None and reported_count > 0
+    )
+
+    if expected_support and not is_supported:
+        raise ValueError(f"{feature_name} support must be true for details or a positive count")
+
+    if is_supported and reported_count == 0:
+        raise ValueError(f"{feature_name} support=true conflicts with count=0")
 
 
 class VizEdge(BaseModel):
@@ -181,6 +213,22 @@ class VizEdge(BaseModel):
 
     externalLinks: List[ExternalLink] = Field(default_factory=list)
     raw: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_feature_evidence(self):
+        validate_feature_support(
+            feature_name="DDI",
+            is_supported=self.hasDDI,
+            reported_count=self.evidenceSummary.ddiRecordCount,
+            details=self.ddi,
+        )
+        validate_feature_support(
+            feature_name="DMI",
+            is_supported=self.hasDMI,
+            reported_count=self.evidenceSummary.dmiRecordCount,
+            details=self.dmi,
+        )
+        return self
 
 
 class NetworkStats(BaseModel):

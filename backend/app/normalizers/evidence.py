@@ -25,12 +25,18 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from numbers import Integral, Real
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from app.schemas.visualization import EvidenceLevel, EvidenceSummary, ExternalLink
+from app.schemas.visualization import (
+    EvidenceLevel,
+    EvidenceSummary,
+    ExternalLink,
+    validate_feature_support,
+)
 
 
-_MISSING_STRINGS = {"", "nan", "none", "null", "na", "n/a", "<na>"}
+_MISSING_STRINGS = {"", "nan", "nat", "none", "null", "na", "n/a", "<na>"}
 
 
 def is_missing(value: Any) -> bool:
@@ -52,16 +58,34 @@ def is_missing(value: Any) -> bool:
     return text.lower() in _MISSING_STRINGS
 
 
-def parse_int(value: Any, default: int = 0) -> int:
-    """Parse integer-like values from Python, pandas, or string data."""
+def parse_optional_non_negative_int(value: Any) -> Optional[int]:
+    """Parse a strict optional non-negative integer without collapsing errors."""
 
     if is_missing(value):
-        return default
+        return None
 
-    try:
-        return int(float(str(value).strip()))
-    except (TypeError, ValueError):
-        return default
+    if isinstance(value, bool):
+        raise ValueError("boolean values are not valid evidence counts")
+
+    if isinstance(value, Integral):
+        parsed = int(value)
+    elif isinstance(value, Real):
+        numeric_value = float(value)
+        if not math.isfinite(numeric_value) or not numeric_value.is_integer():
+            raise ValueError("evidence counts must be finite integers")
+        parsed = int(numeric_value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not re.fullmatch(r"\d+", text):
+            raise ValueError("evidence counts must be decimal integer strings")
+        parsed = int(text)
+    else:
+        raise ValueError("evidence counts must be integer-like values")
+
+    if parsed < 0:
+        raise ValueError("evidence counts must be non-negative")
+
+    return parsed
 
 
 def parse_bool(value: Any, default: Optional[bool] = None) -> Optional[bool]:
@@ -165,6 +189,46 @@ def normalize_list(
     return result
 
 
+def normalize_counted_details(
+    raw: Dict[str, Any],
+    key: str,
+    normalizer: Callable[[Any], List[str]],
+) -> Tuple[List[str], Optional[int]]:
+    """Normalize a list-backed field while preserving source presence semantics."""
+
+    if key not in raw:
+        return [], None
+
+    value = raw[key]
+
+    if isinstance(value, (dict, bool)):
+        raise ValueError(f"{key} must not be a dict or boolean")
+
+    if isinstance(value, (list, tuple, set)):
+        if not value:
+            return [], 0
+        for item in _flatten_list_value(value):
+            if isinstance(item, (dict, bool)):
+                raise ValueError(f"{key} contains an invalid item")
+            if isinstance(item, (int, float)) and not is_missing(item):
+                raise ValueError(f"{key} contains a numeric item")
+    elif isinstance(value, (int, float)):
+        if is_missing(value):
+            return [], None
+        raise ValueError(f"{key} must not be a numeric value")
+    elif is_missing(value):
+        return [], None
+    elif not isinstance(value, str):
+        raise ValueError(f"{key} must be a string or list-like value")
+
+    details = normalizer(value)
+
+    if not details:
+        return [], None
+
+    return details, len(details)
+
+
 def normalize_pmids(value: Any) -> List[str]:
     """Normalize PubMed IDs from raw publication fields."""
 
@@ -173,8 +237,9 @@ def normalize_pmids(value: Any) -> List[str]:
 
     for pmid in pmids:
         clean = _clean_identifier(pmid)
-        if re.fullmatch(r"\d+", clean):
-            result.append(clean)
+        if not re.fullmatch(r"\d+", clean):
+            raise ValueError(f"invalid PubMed identifier: {clean}")
+        result.append(clean)
 
     return _dedupe(result)
 
@@ -187,8 +252,9 @@ def normalize_pdb_ids(value: Any) -> List[str]:
 
     for pdb_id in pdb_ids:
         clean = _clean_identifier(pdb_id).upper()
-        if re.fullmatch(r"[A-Z0-9]{4}", clean):
-            result.append(clean)
+        if not re.fullmatch(r"[A-Z0-9]{4}", clean):
+            raise ValueError(f"invalid PDB identifier: {clean}")
+        result.append(clean)
 
     return _dedupe(result)
 
@@ -233,7 +299,16 @@ def build_pdb_links(pdb_ids: Iterable[str]) -> List[ExternalLink]:
     ]
 
 
-def compute_evidence_level(summary: EvidenceSummary) -> EvidenceLevel:
+def _is_positive(count: Optional[int]) -> bool:
+    return count is not None and count > 0
+
+
+def compute_evidence_level(
+    summary: EvidenceSummary,
+    *,
+    has_ddi: bool,
+    has_dmi: bool,
+) -> EvidenceLevel:
     """Compute the first-pass evidence level in the backend."""
 
     if summary.isCoComplexOnly:
@@ -242,20 +317,20 @@ def compute_evidence_level(summary: EvidenceSummary) -> EvidenceLevel:
     if summary.hasStructuralEvidence:
         return "high"
 
-    if (summary.hasDDI or summary.hasDMI) and summary.publicationCount > 0:
+    if (has_ddi or has_dmi) and _is_positive(summary.publicationCount):
         return "high"
 
     if (
-        summary.sourceCount >= 2
-        or summary.publicationCount >= 2
-        or summary.goldRecordCount >= 2
+        (summary.sourceCount is not None and summary.sourceCount >= 2)
+        or (summary.publicationCount is not None and summary.publicationCount >= 2)
+        or (summary.goldRecordCount is not None and summary.goldRecordCount >= 2)
     ):
         return "medium"
 
     if (
-        summary.sourceCount > 0
-        or summary.methodCount > 0
-        or summary.publicationCount > 0
+        _is_positive(summary.sourceCount)
+        or _is_positive(summary.methodCount)
+        or _is_positive(summary.publicationCount)
     ):
         return "low"
 
@@ -285,32 +360,56 @@ def normalize_evidence(
     is_confirmed_ppi = bool(is_confirmed_ppi)
     is_co_complex_only = bool(is_co_complex_only)
 
-    evidence_sources = normalize_list(raw.get("sources"))
+    evidence_sources, source_count = normalize_counted_details(
+        raw,
+        "sources",
+        normalize_list,
+    )
     hpa_datasets = normalize_list(raw.get("hpa_datasets"))
-    methods = normalize_list(raw.get("methods"))
+    methods, method_count = normalize_counted_details(raw, "methods", normalize_list)
 
-    publications = normalize_pmids(raw.get("publications"))
-    supporting_structures = normalize_pdb_ids(raw.get("supporting_structures"))
+    publications, publication_count = normalize_counted_details(
+        raw,
+        "publications",
+        normalize_pmids,
+    )
+    supporting_structures, structure_count = normalize_counted_details(
+        raw,
+        "supporting_structures",
+        normalize_pdb_ids,
+    )
 
     ddi = normalize_list(raw.get("ddi"), split_semicolon=False, split_pipe=True)
     dmi = normalize_list(raw.get("dmi"), split_semicolon=False, split_pipe=True)
 
-    n_ddi = parse_int(raw.get("n_ddi"))
-    n_dmi = parse_int(raw.get("n_dmi"))
-    gold_record_count = parse_int(raw.get("gold_record_count"))
+    ddi_record_count = parse_optional_non_negative_int(raw.get("n_ddi"))
+    dmi_record_count = parse_optional_non_negative_int(raw.get("n_dmi"))
+    gold_record_count = parse_optional_non_negative_int(raw.get("gold_record_count"))
 
-    has_ddi = n_ddi > 0 or len(ddi) > 0
-    has_dmi = n_dmi > 0 or len(dmi) > 0
+    has_ddi = bool(ddi) or _is_positive(ddi_record_count)
+    has_dmi = bool(dmi) or _is_positive(dmi_record_count)
+    validate_feature_support(
+        feature_name="DDI",
+        is_supported=has_ddi,
+        reported_count=ddi_record_count,
+        details=ddi,
+    )
+    validate_feature_support(
+        feature_name="DMI",
+        is_supported=has_dmi,
+        reported_count=dmi_record_count,
+        details=dmi,
+    )
     has_structural_evidence = len(supporting_structures) > 0
 
     summary = EvidenceSummary(
-        sourceCount=len(evidence_sources),
-        methodCount=len(methods),
-        publicationCount=len(publications),
-        structureCount=len(supporting_structures),
+        sourceCount=source_count,
+        methodCount=method_count,
+        publicationCount=publication_count,
+        structureCount=structure_count,
+        ddiRecordCount=ddi_record_count,
+        dmiRecordCount=dmi_record_count,
         goldRecordCount=gold_record_count,
-        hasDDI=has_ddi,
-        hasDMI=has_dmi,
         hasPDB=has_structural_evidence,
         hasStructuralEvidence=has_structural_evidence,
         isConfirmedPpi=is_confirmed_ppi,
@@ -331,7 +430,11 @@ def normalize_evidence(
         "isConfirmedPpi": is_confirmed_ppi,
         "isCoComplexOnly": is_co_complex_only,
         "evidenceSummary": summary,
-        "evidenceLevel": compute_evidence_level(summary),
+        "evidenceLevel": compute_evidence_level(
+            summary,
+            has_ddi=has_ddi,
+            has_dmi=has_dmi,
+        ),
         "externalLinks": build_pubmed_links(publications)
         + build_pdb_links(supporting_structures),
     }
