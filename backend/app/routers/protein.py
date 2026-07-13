@@ -13,7 +13,7 @@ from app.transform import (
     protein_node,
     edge,
 )
-from app.normalizers.evidence import normalize_evidence
+from app.normalizers.evidence import extract_evidence_input, normalize_evidence
 from app.normalizers.protein import normalize_protein_node
 from app.schemas.visualization import (
     LegendItem,
@@ -248,34 +248,8 @@ def _make_protein_neighbor_edge(
     source_id: str,
     target_id: str,
 ) -> VizEdge:
-    ddi_value = first_existing(row, ["ddi", "DDI", "ddi_annotations"])
-    dmi_value = first_existing(row, ["dmi", "DMI", "dmi_annotations"])
-
-    evidence_raw = dict(row)
-    evidence_raw.update(
-        {
-            "sources": split_list(first_existing(row, ["sources", "source_dbs"])),
-            "methods": split_list(
-                first_existing(row, ["methods", "experimental_methods"])
-            ),
-            "publications": split_list(
-                first_existing(row, ["publications", "pmids", "pmid"])
-            ),
-            "supporting_structures": split_list(
-                first_existing(
-                    row,
-                    ["supporting_structures", "pdb_ids", "structures"],
-                )
-            ),
-            "n_ddi": first_existing(row, ["n_ddi", "ddi_count"]),
-            "n_dmi": first_existing(row, ["n_dmi", "dmi_count"]),
-            "ddi": split_list(ddi_value),
-            "dmi": split_list(dmi_value),
-        }
-    )
-
     evidence = normalize_evidence(
-        evidence_raw,
+        extract_evidence_input(row),
         is_confirmed_ppi=True,
         is_co_complex_only=False,
     )

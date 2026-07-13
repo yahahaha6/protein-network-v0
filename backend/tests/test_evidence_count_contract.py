@@ -47,6 +47,43 @@ class EvidenceCountContractTests(unittest.TestCase):
             },
         )
 
+    def test_legacy_adapter_sentinel_normalizes_to_missing_evidence(self):
+        normalized = self.normalize_case("legacy_adapter_missing")
+        summary = normalized["evidenceSummary"]
+
+        self.assertEqual(normalized["evidenceSources"], [])
+        self.assertEqual(normalized["methods"], [])
+        self.assertEqual(normalized["publications"], [])
+        self.assertEqual(normalized["supportingStructures"], [])
+        self.assertEqual(normalized["ddi"], [])
+        self.assertEqual(normalized["dmi"], [])
+        self.assertFalse(normalized["hasDDI"])
+        self.assertFalse(normalized["hasDMI"])
+        self.assertEqual(
+            [
+                summary.sourceCount,
+                summary.methodCount,
+                summary.publicationCount,
+                summary.structureCount,
+                summary.ddiRecordCount,
+                summary.dmiRecordCount,
+                summary.goldRecordCount,
+            ],
+            [None, None, None, None, None, None, None],
+        )
+
+    def test_trimmed_legacy_adapter_sentinel_normalizes_to_null_count(self):
+        normalized = normalize_evidence({"n_ddi": "  暂无数据  "})
+
+        self.assertIsNone(normalized["evidenceSummary"].ddiRecordCount)
+
+    def test_unrecognized_dash_count_and_pdb_tokens_remain_rejected(self):
+        with self.assertRaises(ValueError):
+            normalize_evidence({"n_ddi": "-"})
+
+        with self.assertRaises(ValueError):
+            normalize_evidence({"supporting_structures": "—"})
+
     def test_explicit_zero_counts_remain_zero(self):
         normalized = self.normalize_case("explicit_zero_counts")
         summary = normalized["evidenceSummary"]
@@ -174,18 +211,19 @@ class EvidenceCountContractTests(unittest.TestCase):
         self.assertEqual(normalized["ddi"], [])
         self.assertTrue(normalized["hasDDI"])
 
-    def test_zero_count_with_nonempty_details_is_rejected(self):
-        with self.assertRaises(ValueError):
-            normalize_evidence({"n_ddi": 0, "ddi": ["DDI:SYNTHETIC_A"]})
+    def test_zero_count_with_nonempty_details_preserves_independent_signals(self):
+        normalized = self.normalize_case("ddi_zero_count_with_details")
 
-    def test_supported_true_with_null_count_is_allowed(self):
-        edge = self.make_edge(
-            hasDDI=True,
-            evidenceSummary=EvidenceSummary(ddiRecordCount=None),
-        )
+        self.assertEqual(normalized["evidenceSummary"].ddiRecordCount, 0)
+        self.assertEqual(normalized["ddi"], ["DDI:SYNTHETIC_A"])
+        self.assertTrue(normalized["hasDDI"])
 
-        self.assertTrue(edge.hasDDI)
-        self.assertIsNone(edge.evidenceSummary.ddiRecordCount)
+    def test_support_without_count_or_details_is_rejected(self):
+        with self.assertRaises(ValidationError):
+            self.make_edge(
+                hasDDI=True,
+                evidenceSummary=EvidenceSummary(ddiRecordCount=None),
+            )
 
     def test_supported_true_with_zero_count_is_rejected(self):
         with self.assertRaises(ValidationError):
@@ -214,9 +252,15 @@ class EvidenceCountContractTests(unittest.TestCase):
         self.assertEqual(normalized["ddi"], ["DDI:SYNTHETIC_A"])
         self.assertTrue(normalized["hasDDI"])
 
-    def test_reported_count_less_than_detail_count_is_rejected(self):
-        with self.assertRaises(ValueError):
-            self.normalize_case("ddi_count_less_than_details")
+    def test_reported_count_less_than_detail_count_preserves_independent_signals(self):
+        normalized = self.normalize_case("ddi_count_less_than_details")
+
+        self.assertEqual(normalized["evidenceSummary"].ddiRecordCount, 1)
+        self.assertEqual(
+            normalized["ddi"],
+            ["DDI:SYNTHETIC_A", "DDI:SYNTHETIC_B"],
+        )
+        self.assertTrue(normalized["hasDDI"])
 
     def test_mixed_valid_and_invalid_publication_items_are_rejected(self):
         with self.assertRaises(ValueError):

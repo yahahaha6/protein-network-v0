@@ -5,7 +5,7 @@ from app.normalizers.evidence import normalize_evidence
 from app.schemas.visualization import VizEdge
 from evidence_semantic_fixtures import (
     CURRENT_SOURCE_CASES,
-    FUTURE_CONTRACT_CASES,
+    EVIDENCE_CONTRACT_CASES,
 )
 
 
@@ -72,33 +72,27 @@ class EvidenceSemanticBaselineTests(unittest.TestCase):
 
         self.assertEqual(serialized["evidenceSummary"]["goldRecordCount"], 4)
 
-    def test_future_supported_with_unknown_count_is_not_current_source_input(self):
-        case = FUTURE_CONTRACT_CASES["supported_with_unknown_count"]
+    def test_zero_count_with_details_is_an_allowed_normalizer_contract(self):
+        case = EVIDENCE_CONTRACT_CASES["zero_count_with_details"]
 
-        self.assertEqual(case["source_input"], {})
-        self.assertTrue(case["expected_semantics"]["support_reported"])
-        self.assertIsNone(case["expected_semantics"]["record_count"])
+        normalized = normalize_evidence(case["input"])
+        expected = case["expected_output"]
 
-    def test_future_supported_with_zero_count_is_not_current_source_support_flag(self):
-        case = FUTURE_CONTRACT_CASES["supported_true_with_zero_count"]
+        self.assertEqual(
+            normalized["evidenceSummary"].ddiRecordCount,
+            expected["ddiRecordCount"],
+        )
+        self.assertEqual(normalized["ddi"], expected["ddi"])
+        self.assertIs(normalized["hasDDI"], expected["hasDDI"])
 
-        self.assertEqual(case["source_input"], {"n_ddi": 0})
-        self.assertTrue(case["expected_semantics"]["support_reported"])
-        self.assertEqual(case["expected_semantics"]["record_count"], 0)
+    def test_malformed_contract_cases_raise_from_normalizer(self):
+        for name, case in EVIDENCE_CONTRACT_CASES.items():
+            if "expected_exception" not in case:
+                continue
 
-    def test_future_conflict_cases_preserve_a2_rejection_boundaries(self):
-        conflict_case_names = [
-            "supported_true_with_zero_count",
-            "zero_count_with_details",
-            "negative_count",
-            "invalid_string_count",
-            "non_integer_count",
-        ]
-
-        for name in conflict_case_names:
-            self.assertTrue(
-                FUTURE_CONTRACT_CASES[name]["expected_semantics"]["should_reject"]
-            )
+            with self.subTest(case=name):
+                with self.assertRaises(case["expected_exception"]):
+                    normalize_evidence(case["input"])
 
 
 if __name__ == "__main__":

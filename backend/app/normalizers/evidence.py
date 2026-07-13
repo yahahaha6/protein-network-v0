@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 from numbers import Integral, Real
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -37,6 +38,31 @@ from app.schemas.visualization import (
 
 
 _MISSING_STRINGS = {"", "nan", "nat", "none", "null", "na", "n/a", "<na>"}
+_LEGACY_EVIDENCE_MISSING_STRINGS = {"暂无数据"}
+
+_EVIDENCE_INPUT_KEYS = (
+    "sources",
+    "hpa_datasets",
+    "methods",
+    "publications",
+    "supporting_structures",
+    "n_ddi",
+    "n_dmi",
+    "ddi",
+    "dmi",
+    "gold_record_count",
+    "evidence_in_ppi_graph",
+)
+
+
+def extract_evidence_input(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Copy present canonical evidence fields without UI fallback or alias lookup."""
+
+    return {
+        key: raw[key]
+        for key in _EVIDENCE_INPUT_KEYS
+        if key in raw
+    }
 
 
 def is_missing(value: Any) -> bool:
@@ -54,8 +80,8 @@ def is_missing(value: Any) -> bool:
     if isinstance(value, float):
         return math.isnan(value)
 
-    text = str(value).strip()
-    return text.lower() in _MISSING_STRINGS
+    text = unicodedata.normalize("NFKC", str(value)).strip().casefold()
+    return text in _MISSING_STRINGS or text in _LEGACY_EVIDENCE_MISSING_STRINGS
 
 
 def parse_optional_non_negative_int(value: Any) -> Optional[int]:
@@ -175,7 +201,7 @@ def normalize_list(
 
         for candidate in candidates:
             clean = _clean_identifier(candidate)
-            if clean and clean.lower() not in _MISSING_STRINGS:
+            if clean and not is_missing(clean):
                 parts.append(clean)
 
     seen = set()

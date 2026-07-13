@@ -1,9 +1,8 @@
-"""Synthetic evidence boundaries for current baseline and future A2 tests.
+"""Synthetic evidence source inputs and executable current contracts.
 
-CURRENT_SOURCE_CASES contain only source-shaped keys accepted by the current
-evidence normalizer and are used by A1.2 baseline tests. FUTURE_CONTRACT_CASES
-preserve semantic inputs and expectations for A2; they do not define current
-source-field contracts or current normalizer output.
+CURRENT_SOURCE_CASES contain only source-shaped keys accepted by the evidence
+normalizer. EVIDENCE_CONTRACT_CASES pair source inputs with either expected
+normalizer output or an expected exception.
 """
 
 from typing import Any, Dict
@@ -32,6 +31,17 @@ CURRENT_SOURCE_CASES: Dict[str, Dict[str, Any]] = {
 # exercise the target count contract without introducing future source aliases.
 A2_SOURCE_CASES: Dict[str, Dict[str, Any]] = {
     "missing_counts": {},
+    "legacy_adapter_missing": {
+        "sources": "暂无数据",
+        "methods": "暂无数据",
+        "publications": "暂无数据",
+        "supporting_structures": "暂无数据",
+        "ddi": "暂无数据",
+        "dmi": "暂无数据",
+        "n_ddi": "暂无数据",
+        "n_dmi": "暂无数据",
+        "gold_record_count": "暂无数据",
+    },
     "explicit_zero_counts": {
         "sources": [],
         "methods": [],
@@ -70,47 +80,35 @@ A2_SOURCE_CASES: Dict[str, Dict[str, Any]] = {
         "n_ddi": 1,
         "ddi": ["DDI:SYNTHETIC_A", "DDI:SYNTHETIC_B"],
     },
+    "ddi_zero_count_with_details": {
+        "n_ddi": 0,
+        "ddi": ["DDI:SYNTHETIC_A"],
+    },
 }
 
 
-FUTURE_CONTRACT_CASES: Dict[str, Dict[str, Any]] = {
-    # support_reported is semantic metadata, not a current source-field key.
-    "supported_with_unknown_count": {
-        "source_input": {},
-        "expected_semantics": {
-            "support_reported": True,
-            "record_count": None,
-        },
-    },
-    "supported_true_with_zero_count": {
-        "source_input": {"n_ddi": 0},
-        "expected_semantics": {
-            "support_reported": True,
-            "record_count": 0,
-            "should_reject": True,
-        },
-    },
+EVIDENCE_CONTRACT_CASES: Dict[str, Dict[str, Any]] = {
     "zero_count_with_details": {
-        "source_input": {
+        "input": {
             "n_ddi": 0,
             "ddi": ["DDI:0001"],
         },
-        "expected_semantics": {
-            "record_count": 0,
-            "detail_records_present": True,
-            "should_reject": True,
+        "expected_output": {
+            "ddiRecordCount": 0,
+            "ddi": ["DDI:0001"],
+            "hasDDI": True,
         },
     },
     "negative_count": {
-        "source_input": {"n_ddi": -1},
-        "expected_semantics": {"should_reject": True},
+        "input": {"n_ddi": -1},
+        "expected_exception": ValueError,
     },
     "invalid_string_count": {
-        "source_input": {"n_ddi": "not-a-number"},
-        "expected_semantics": {"should_reject": True},
+        "input": {"n_ddi": "not-a-number"},
+        "expected_exception": ValueError,
     },
     "non_integer_count": {
-        "source_input": {"n_ddi": 1.5},
-        "expected_semantics": {"should_reject": True},
+        "input": {"n_ddi": 1.5},
+        "expected_exception": ValueError,
     },
 }

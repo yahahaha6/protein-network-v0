@@ -153,27 +153,17 @@ def validate_feature_support(
     reported_count: Optional[int],
     details: List[str],
 ) -> None:
-    """Enforce the shared DDI/DMI count, detail, and support invariants."""
+    """Require support to match the independent count/detail support signals."""
 
     detail_count = len(details)
-
-    if reported_count == 0 and detail_count > 0:
-        raise ValueError(f"{feature_name} count=0 conflicts with non-empty details")
-
-    if reported_count is not None and reported_count < detail_count:
-        raise ValueError(
-            f"{feature_name} reported count is smaller than normalized details"
-        )
-
     expected_support = detail_count > 0 or (
         reported_count is not None and reported_count > 0
     )
 
-    if expected_support and not is_supported:
-        raise ValueError(f"{feature_name} support must be true for details or a positive count")
-
-    if is_supported and reported_count == 0:
-        raise ValueError(f"{feature_name} support=true conflicts with count=0")
+    if is_supported != expected_support:
+        raise ValueError(
+            f"{feature_name} support must match non-empty details or a positive count"
+        )
 
 
 class VizEdge(BaseModel):

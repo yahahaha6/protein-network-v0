@@ -13,7 +13,7 @@ from __future__ import annotations
 import ast
 from typing import Any, Optional
 
-from app.normalizers.evidence import normalize_evidence
+from app.normalizers.evidence import extract_evidence_input, normalize_evidence
 from app.schemas.visualization import (
     LegendItem,
     MediatingSubunit,
@@ -320,20 +320,7 @@ def make_complex_ext_edge(
     }
 
     evidence = normalize_evidence(
-        {
-            **row,
-            "sources": first_existing(row, ["sources", "source_dbs"]),
-            "methods": first_existing(row, ["methods", "experimental_methods"]),
-            "publications": first_existing(row, ["publications", "pmids", "pmid"]),
-            "supporting_structures": first_existing(
-                row,
-                ["supporting_structures", "pdb_ids", "structures"],
-            ),
-            "ddi": first_existing(row, ["ddi", "domain_domain_interactions"]),
-            "dmi": first_existing(row, ["dmi", "domain_motif_interactions"]),
-            "n_ddi": first_existing(row, ["n_ddi", "ddi_count"]),
-            "n_dmi": first_existing(row, ["n_dmi", "dmi_count"]),
-        },
+        extract_evidence_input(row),
         is_confirmed_ppi=True,
         is_co_complex_only=False,
     )

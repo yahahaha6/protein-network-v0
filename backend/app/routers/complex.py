@@ -16,7 +16,7 @@ from app.transform import (
     protein_node,
     edge,
 )
-from app.normalizers.evidence import normalize_evidence
+from app.normalizers.evidence import extract_evidence_input, normalize_evidence
 from app.normalizers.complex_ext import (
     complex_ext_edge_passes_filters as normalize_complex_ext_edge_passes_filters,
     make_complex_ext_edge as normalize_complex_ext_edge,
@@ -243,32 +243,8 @@ def _make_complex_intra_edge(
     edge_kind = "confirmed_ppi" if is_confirmed_ppi else "co_complex_only"
     label = "Confirmed PPI" if is_confirmed_ppi else "Co-complex only"
 
-    evidence_raw = dict(row)
-    evidence_raw.update(
-        {
-            "evidence_in_ppi_graph": is_confirmed_ppi,
-            "sources": split_list(first_existing(row, ["sources", "source_dbs"])),
-            "methods": split_list(
-                first_existing(row, ["methods", "experimental_methods"])
-            ),
-            "publications": split_list(
-                first_existing(row, ["publications", "pmids", "pmid"])
-            ),
-            "supporting_structures": split_list(
-                first_existing(
-                    row,
-                    ["supporting_structures", "pdb_ids", "structures"],
-                )
-            ),
-            "n_ddi": first_existing(row, ["n_ddi", "ddi_count"]),
-            "n_dmi": first_existing(row, ["n_dmi", "dmi_count"]),
-            "ddi": split_list(first_existing(row, ["ddi", "DDI", "ddi_annotations"])),
-            "dmi": split_list(first_existing(row, ["dmi", "DMI", "dmi_annotations"])),
-        }
-    )
-
     evidence = normalize_evidence(
-        evidence_raw,
+        extract_evidence_input(row),
         is_confirmed_ppi=is_confirmed_ppi,
         is_co_complex_only=not is_confirmed_ppi,
     )
