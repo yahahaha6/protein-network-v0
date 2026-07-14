@@ -23,12 +23,21 @@ export type EdgeDetailViewModel = {
   source: string;
   target: string;
   evidence: EvidenceSummary;
+  reportedCounts: ReportedCountViewModel[];
   showInteractionEvidence: boolean;
   showFeatureAnnotations: boolean;
   showCoMembershipExplanation: boolean;
   showExternalMediation: boolean;
   coMembership: { complexId?: unknown; complexName?: unknown } | null;
   externalMediation: ReturnType<typeof getComplexExternalExplanationFields> | null;
+};
+
+export type ReportedCountViewModel = {
+  key: keyof EvidenceSummary;
+  label: string;
+  value: number | null;
+  display: string;
+  detailStatus: string | null;
 };
 
 const RELATION_KINDS = new Set<RelationKind>([
@@ -50,6 +59,90 @@ function summaryOf(summary?: Partial<EvidenceSummary>): EvidenceSummary {
   };
 }
 
+export function formatReportedCount(count: number | null | undefined): string {
+  if (count === null || count === undefined) {
+    return "Not reported by source";
+  }
+
+  if (count === 0) {
+    return "Source reported 0 records";
+  }
+
+  return `${count} records reported`;
+}
+
+export function formatReportedCountDetails(
+  count: number | null | undefined,
+  details?: unknown[]
+): string | null {
+  if (details === undefined) {
+    return null;
+  }
+
+  if (count !== null && count !== undefined && count > 0 && details.length === 0) {
+    return "Count reported; details unavailable";
+  }
+
+  if ((count === null || count === undefined) && details.length > 0) {
+    return "Details available; count not reported";
+  }
+
+  return null;
+}
+
+function buildReportedCounts(
+  evidence: EvidenceSummary,
+  edge: EdgeDetailInput
+): ReportedCountViewModel[] {
+  const detailsOf = (value: unknown) =>
+    Array.isArray(value) ? value : undefined;
+  const definitions: Array<{
+    key: keyof EvidenceSummary;
+    label: string;
+    details?: unknown[];
+  }> = [
+    {
+      key: "sourceCount",
+      label: "Source count",
+      details: detailsOf(edge.evidenceSources),
+    },
+    {
+      key: "methodCount",
+      label: "Method count",
+      details: detailsOf(edge.methods),
+    },
+    {
+      key: "publicationCount",
+      label: "Publication count",
+      details: detailsOf(edge.publications),
+    },
+    {
+      key: "structureCount",
+      label: "Structure count",
+      details: detailsOf(edge.supportingStructures),
+    },
+    {
+      key: "ddiRecordCount",
+      label: "DDI record count",
+      details: detailsOf(edge.ddi),
+    },
+    {
+      key: "dmiRecordCount",
+      label: "DMI record count",
+      details: detailsOf(edge.dmi),
+    },
+    { key: "goldRecordCount", label: "Gold record count" },
+  ];
+
+  return definitions.map(({ key, label, details }) => ({
+    key,
+    label,
+    value: evidence[key],
+    display: formatReportedCount(evidence[key]),
+    detailStatus: formatReportedCountDetails(evidence[key], details),
+  }));
+}
+
 export function buildEdgeDetailViewModel(
   edge: EdgeDetailInput
 ): EdgeDetailViewModel {
@@ -63,6 +156,7 @@ export function buildEdgeDetailViewModel(
     relationKind === "complex_subunit_pair_co_membership_only";
   const isExternal = relationKind === "complex_external_partner";
   const supportsInteractionEvidence = !isCoMembership;
+  const evidence = summaryOf(edge.evidenceSummary);
 
   return {
     relationKind,
@@ -70,7 +164,8 @@ export function buildEdgeDetailViewModel(
     relationDescription: presentation.description,
     source: String(edge.source ?? "Unknown source"),
     target: String(edge.target ?? "Unknown target"),
-    evidence: summaryOf(edge.evidenceSummary),
+    evidence,
+    reportedCounts: buildReportedCounts(evidence, edge),
     showInteractionEvidence: supportsInteractionEvidence,
     showFeatureAnnotations: supportsInteractionEvidence,
     showCoMembershipExplanation: isCoMembership,

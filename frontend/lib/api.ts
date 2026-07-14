@@ -178,13 +178,23 @@ export type GlobalPpiEdgeResponse = {
   raw?: Record<string, unknown>;
 };
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, statusText: string) {
+    super(`Request failed: ${status} ${statusText}`);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+    throw new ApiRequestError(response.status, response.statusText);
   }
 
   return response.json() as Promise<T>;

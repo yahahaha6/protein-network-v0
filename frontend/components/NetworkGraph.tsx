@@ -20,14 +20,19 @@ import {
   toDetailListPreview,
 } from "@/lib/detailPresentation";
 import {
-  getEdgeLegendItems,
-  getRelationPresentation,
+  EDGE_SELECTED_STYLE,
   MANAGED_EDGE_PRESENTATION_CLASSES,
+  NODE_SELECTED_STYLE,
+  buildEdgePresentationState,
+  getEdgeLegendSections,
+  getEdgePresentationStyleRules,
+  getNodeLegendItems,
+  getNodePresentationStyleRules,
+  isRelationKind,
 } from "@/lib/networkPresentation";
-import type {
-  CanonicalNetworkEdge,
-  RelationKind,
-} from "@/lib/networkTypes";
+import type { EdgePresentationInput } from "@/lib/networkPresentation";
+import { buildNodeDetailViewModel } from "@/lib/nodeDetailViewModel";
+import type { CanonicalNetworkEdge } from "@/lib/networkTypes";
 
 type DetailRecord = Record<string, unknown>;
 
@@ -98,17 +103,6 @@ type SelectedElement =
   | { kind: "node"; data: DetailRecord }
   | { kind: "edge"; data: DetailRecord }
   | null;
-
-const RELATION_KINDS = new Set<RelationKind>([
-  "protein_physical_interaction",
-  "complex_subunit_pair_supported",
-  "complex_subunit_pair_co_membership_only",
-  "complex_external_partner",
-]);
-
-function isRelationKind(value: unknown): value is RelationKind {
-  return typeof value === "string" && RELATION_KINDS.has(value as RelationKind);
-}
 
 function getNodeHref(
   data: DetailRecord,
@@ -249,6 +243,10 @@ function toNetworkElements(elements: NetworkGraphInput): NetworkElements {
             normalizedEdge.isConfirmedPpi ?? data.isConfirmedPpi ?? false,
           isCoComplexOnly:
             normalizedEdge.isCoComplexOnly ?? data.isCoComplexOnly ?? false,
+          isSubunitOfOtherComplex:
+            normalizedEdge.isSubunitOfOtherComplex ??
+            data.isSubunitOfOtherComplex ??
+            null,
           evidenceSummary:
             normalizedEdge.evidenceSummary ?? data.evidenceSummary ?? undefined,
           externalLinks:
@@ -358,6 +356,42 @@ function DetailCard({ label, value }: { label: string; value: unknown }) {
   );
 }
 
+function ReportedCountCard({
+  label,
+  display,
+  detailStatus,
+}: {
+  label: string;
+  display: string;
+  detailStatus: string | null;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1 break-words font-medium text-slate-200">{display}</p>
+      {detailStatus && (
+        <p className="mt-1 text-xs leading-5 text-amber-300">{detailStatus}</p>
+      )}
+    </div>
+  );
+}
+
+function toEdgePresentationInput(
+  data: DetailRecord | undefined
+): EdgePresentationInput | null {
+  if (!data || !isRelationKind(data.relationKind)) {
+    return null;
+  }
+
+  return {
+    relationKind: data.relationKind,
+    hasDDI: data.hasDDI === true,
+    hasDMI: data.hasDMI === true,
+    hasStructuralEvidence: data.hasStructuralEvidence === true,
+    isSubunitOfOtherComplex: data.isSubunitOfOtherComplex === true,
+  };
+}
+
 function applyRelationPresentationClasses(cy: Core) {
   const managedClasses = MANAGED_EDGE_PRESENTATION_CLASSES.join(" ");
 
@@ -366,7 +400,15 @@ function applyRelationPresentationClasses(cy: Core) {
     edge.removeClass(managedClasses);
 
     if (isRelationKind(relationKind)) {
-      edge.addClass(getRelationPresentation(relationKind).edgeClassName);
+      const presentation = buildEdgePresentationState({
+        relationKind,
+        hasDDI: edge.data("hasDDI") === true,
+        hasDMI: edge.data("hasDMI") === true,
+        hasStructuralEvidence: edge.data("hasStructuralEvidence") === true,
+        isSubunitOfOtherComplex:
+          edge.data("isSubunitOfOtherComplex") === true,
+      });
+      edge.addClass(presentation.classes.join(" "));
     }
   });
 }
@@ -392,47 +434,10 @@ const networkStyle = [
       "overlay-opacity": 0,
     },
   },
-  {
-    selector: 'node[proteinCategory = "TF"]',
-    style: { "background-color": "#22c55e", "border-color": "#86efac" },
-  },
-  {
-    selector: 'node[proteinCategory = "EF"]',
-    style: { "background-color": "#38bdf8", "border-color": "#bae6fd" },
-  },
-  {
-    selector: 'node[proteinCategory = "TF_and_EF"]',
-    style: { "background-color": "#f97316", "border-color": "#fed7aa" },
-  },
-  {
-    selector: 'node[isFocus = "true"]',
-    style: {
-      width: 42,
-      height: 42,
-      "background-color": "#facc15",
-      "border-width": 4,
-      "border-color": "#fde68a",
-      "font-size": 12,
-      "font-weight": 800,
-    },
-  },
-  {
-    selector: 'node[type = "complex"]',
-    style: {
-      width: 52,
-      height: 52,
-      "background-color": "#a855f7",
-      "border-color": "#d8b4fe",
-      "font-size": 11,
-    },
-  },
+  ...getNodePresentationStyleRules(),
   {
     selector: "node:selected",
-    style: {
-      "border-width": 5,
-      "border-color": "#f8fafc",
-      "background-color": "#0ea5e9",
-    },
+    style: NODE_SELECTED_STYLE,
   },
   {
     selector: "edge",
@@ -447,29 +452,10 @@ const networkStyle = [
       "overlay-opacity": 0,
     },
   },
-  {
-    selector: "edge.edge-relation-protein-physical-interaction",
-    style: { width: 2, "line-color": "#38bdf8", "line-style": "solid", opacity: 0.9 },
-  },
-  {
-    selector: "edge.edge-relation-complex-subunit-pair-supported",
-    style: { width: 2.2, "line-color": "#34d399", "line-style": "solid", opacity: 0.95 },
-  },
-  {
-    selector: "edge.edge-relation-complex-subunit-pair-co-membership-only",
-    style: { width: 2.2, "line-color": "#fb923c", "line-style": "dashed", opacity: 0.9 },
-  },
-  {
-    selector: "edge.edge-relation-complex-external-partner",
-    style: { width: 2.2, "line-color": "#a78bfa", "line-style": "solid", opacity: 0.9 },
-  },
+  ...getEdgePresentationStyleRules(),
   {
     selector: "edge:selected",
-    style: { width: 4, "line-color": "#f8fafc", opacity: 1 },
-  },
-  {
-    selector: "edge.edge-relation-complex-subunit-pair-co-membership-only:selected",
-    style: { "line-style": "dashed" },
+    style: EDGE_SELECTED_STYLE,
   },
   {
     selector: "edge.show-label",
@@ -528,13 +514,34 @@ export default function NetworkGraph({
   const graphElements = useMemo(() => toNetworkElements(elements), [elements]);
   const [selectedElement, setSelectedElement] = useState<SelectedElement>(null);
 
-  const edgeLegendItems = useMemo(() => {
-    const relationKinds = graphElements.edges
-      .map((edge) => (edge.data as DetailRecord | undefined)?.relationKind)
-      .filter(isRelationKind);
+  const edgeLegendSections = useMemo(() => {
+    const presentationInputs = graphElements.edges
+      .map((edge) => toEdgePresentationInput(edge.data as DetailRecord | undefined))
+      .filter((edge): edge is EdgePresentationInput => edge !== null);
 
-    return getEdgeLegendItems(relationKinds);
+    return getEdgeLegendSections(presentationInputs);
   }, [graphElements.edges]);
+
+  const nodeLegendItems = useMemo(() => {
+    const nodeData = graphElements.nodes.map(
+      (node) => (node.data ?? {}) as DetailRecord
+    );
+
+    return getNodeLegendItems().filter((item) => {
+      if (item.key === "Focus") {
+        return Boolean(focusNodeId);
+      }
+
+      if (item.key === "Complex") {
+        return nodeData.some((node) => {
+          const type = String(node.nodeType ?? node.type ?? "").toLowerCase();
+          return type.includes("complex") || String(node.id ?? "").startsWith("CORUM:");
+        });
+      }
+
+      return nodeData.some((node) => node.proteinCategory === item.key);
+    });
+  }, [focusNodeId, graphElements.nodes]);
 
   const selectedNodeData =
     selectedElement?.kind === "node" ? selectedElement.data : null;
@@ -543,6 +550,11 @@ export default function NetworkGraph({
   const selectedNodeHref = selectedNodeData
     ? getNodeHref(selectedNodeData, nodeNavigationMode)
     : null;
+  const selectedNodeView = useMemo(
+    () =>
+      selectedNodeData ? buildNodeDetailViewModel(selectedNodeData) : null,
+    [selectedNodeData]
+  );
   const selectedEdgeView = useMemo(() => {
     if (!selectedEdgeData || !isRelationKind(selectedEdgeData.relationKind)) {
       return null;
@@ -676,24 +688,67 @@ export default function NetworkGraph({
 
         <div ref={containerRef} className="h-[760px] w-full rounded-xl border border-slate-800 bg-slate-900" />
 
-        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
-          <span className="font-semibold uppercase tracking-wide text-slate-500">Node legend</span>
-          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-green-200 bg-green-500" />TF</span>
-          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-sky-200 bg-sky-400" />EF</span>
-          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-orange-200 bg-orange-500" />TF_and_EF</span>
-          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-yellow-200 bg-yellow-400" />Focus protein</span>
-          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-purple-200 bg-purple-500" />Complex</span>
-        </div>
-
-        {edgeLegendItems.length > 0 && (
+        {nodeLegendItems.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
-            <span className="font-semibold uppercase tracking-wide text-slate-500">Edge legend</span>
-            {edgeLegendItems.map((item) => (
+            <span className="font-semibold uppercase tracking-wide text-slate-500">
+              Node legend
+            </span>
+            {nodeLegendItems.map((item) => (
               <span key={item.key} className="inline-flex items-center gap-2">
-                <span className={item.swatchClassName} />
+                <span
+                  className="h-3 w-3 rounded-full border"
+                  style={{
+                    backgroundColor: item.color,
+                    borderColor: item.borderColor,
+                  }}
+                />
                 {item.label}
               </span>
             ))}
+          </div>
+        )}
+
+        {edgeLegendSections.relationship.length > 0 && (
+          <div className="mt-3 space-y-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-semibold uppercase tracking-wide text-slate-500">
+                Relationship
+              </span>
+              {edgeLegendSections.relationship.map((item) => (
+                <span key={item.key} className="inline-flex items-center gap-2">
+                  <span
+                    className="inline-block w-8"
+                    style={{
+                      borderTopColor: item.visual.color,
+                      borderTopStyle: item.visual.lineStyle,
+                      borderTopWidth: item.visual.width,
+                    }}
+                  />
+                  {item.label}
+                </span>
+              ))}
+            </div>
+
+            {edgeLegendSections.evidenceAndContext.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-3">
+                <span className="font-semibold uppercase tracking-wide text-slate-500">
+                  Evidence / context
+                </span>
+                {edgeLegendSections.evidenceAndContext.map((item) => (
+                  <span key={item.key} className="inline-flex items-center gap-2">
+                    <span
+                      className="inline-block w-8"
+                      style={{
+                        borderTopColor: item.visual.color,
+                        borderTopStyle: item.visual.lineStyle,
+                        borderTopWidth: item.visual.width,
+                      }}
+                    />
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -710,11 +765,11 @@ export default function NetworkGraph({
 
         {!selectedElement && <div className="mt-4 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">No node or edge selected.</div>}
 
-        {selectedNodeData && (
+        {selectedNodeData && selectedNodeView && (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-cyan-900/70 bg-cyan-950/20 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Selected Node</p>
-              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">{String(selectedNodeData.label ?? selectedNodeData.id ?? "Unknown")}</h3>
+              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">{selectedNodeView.title}</h3>
               <p className="mt-1 break-words text-xs text-slate-400">{String(selectedNodeData.id ?? "N/A")}</p>
               {selectedNodeHref && enableNodeNavigation && (
                 <button type="button" onClick={() => router.push(selectedNodeHref)} className="mt-3 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">
@@ -722,10 +777,17 @@ export default function NetworkGraph({
                 </button>
               )}
             </div>
-            {typeof selectedNodeData.hpaProfile === "object" && selectedNodeData.hpaProfile !== null && (
-              <ExpressionProfileCard data={selectedNodeData.hpaProfile as DetailRecord} compact />
+            {selectedNodeView.kind === "protein" && selectedNodeView.hpaProfile && (
+              <ExpressionProfileCard data={selectedNodeView.hpaProfile} compact />
             )}
-            <DetailFields title="Node Fields" data={selectedNodeData} />
+            <DetailFields
+              title={
+                selectedNodeView.kind === "protein"
+                  ? "Protein Fields"
+                  : "Complex Fields"
+              }
+              data={selectedNodeView.fields}
+            />
           </div>
         )}
 
@@ -775,11 +837,14 @@ export default function NetworkGraph({
               <div className="rounded-xl border border-cyan-900/70 bg-cyan-950/10 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Interaction Evidence</p>
                 <div className="mt-3 grid gap-3 text-sm">
-                  <DetailCard label="Source count" value={selectedEdgeView.evidence.sourceCount} />
-                  <DetailCard label="Method count" value={selectedEdgeView.evidence.methodCount} />
-                  <DetailCard label="Publication count" value={selectedEdgeView.evidence.publicationCount} />
-                  <DetailCard label="Structure count" value={selectedEdgeView.evidence.structureCount} />
-                  <DetailCard label="Gold record count" value={selectedEdgeView.evidence.goldRecordCount} />
+                  {selectedEdgeView.reportedCounts.map((count) => (
+                    <ReportedCountCard
+                      key={count.key}
+                      label={count.label}
+                      display={count.display}
+                      detailStatus={count.detailStatus}
+                    />
+                  ))}
                   <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Source Databases</p><div className="mt-2">{renderValueList(selectedEdgeData.evidenceSources, "No source databases")}</div></div>
                   <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Experimental Methods</p><div className="mt-2">{renderValueList(selectedEdgeData.methods, "No methods")}</div></div>
                   <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Publications</p><div className="mt-2">{renderValueList(selectedEdgeData.publications, "No publications")}</div></div>
@@ -791,8 +856,6 @@ export default function NetworkGraph({
               <div className="rounded-xl border border-pink-900/70 bg-pink-950/10 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-pink-300">Feature and Structural Annotations</p>
                 <div className="mt-3 grid gap-3 text-sm">
-                  <DetailCard label="DDI record count" value={selectedEdgeView.evidence.ddiRecordCount} />
-                  <DetailCard label="DMI record count" value={selectedEdgeView.evidence.dmiRecordCount} />
                   <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">DDI Details</p><div className="mt-2">{renderValueList(selectedEdgeData.ddi, "No DDI records")}</div></div>
                   <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">DMI Details</p><div className="mt-2">{renderValueList(selectedEdgeData.dmi, "No DMI records")}</div></div>
                   <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Supporting PDB Structures</p><div className="mt-2">{renderValueList(selectedEdgeData.supportingStructures, "No supporting PDB structures")}</div></div>

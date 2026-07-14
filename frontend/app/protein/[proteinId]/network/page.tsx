@@ -1,6 +1,6 @@
 import Link from "next/link";
 import NetworkGraph from "@/components/NetworkGraph";
-import { getProteinNeighbors, getTotalEdges } from "@/lib/api";
+import { ApiRequestError, getProteinNeighbors, getTotalEdges } from "@/lib/api";
 
 type ProteinNetworkPageProps = {
   params: Promise<{
@@ -121,6 +121,7 @@ export default async function ProteinNeighborNetworkPage({
 
   let network: Awaited<ReturnType<typeof getProteinNeighbors>> | null = null;
   let loadError = false;
+  let networkUnavailable = false;
 
   try {
     network = await getProteinNeighbors(
@@ -129,11 +130,15 @@ export default async function ProteinNeighborNetworkPage({
       activeFilters
     );
   } catch (error) {
-    console.error(error);
-    loadError = true;
+    if (error instanceof ApiRequestError && error.status === 404) {
+      networkUnavailable = true;
+    } else {
+      console.error(error);
+      loadError = true;
+    }
   }
 
-  if (loadError || !network) {
+  if (networkUnavailable || loadError || !network) {
     return (
       <main className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
         <div className="mx-auto max-w-6xl">
@@ -144,11 +149,28 @@ export default async function ProteinNeighborNetworkPage({
             ← Back to protein detail
           </Link>
 
-          <div className="mt-8 rounded-2xl border border-red-800 bg-red-950/40 p-6">
-            <h1 className="text-2xl font-bold">Failed to load network</h1>
+          <div
+            className={`mt-8 rounded-2xl border p-6 ${
+              networkUnavailable
+                ? "border-amber-700 bg-amber-950/30"
+                : "border-red-800 bg-red-950/40"
+            }`}
+          >
+            <h1 className="text-2xl font-bold">
+              {networkUnavailable
+                ? "No high-confidence direct PPI evidence"
+                : "Failed to load network"}
+            </h1>
             <p className="mt-3 text-slate-300">
-              Could not load neighbor network for protein {normalizedProteinId}.
+              {networkUnavailable
+                ? `No high-confidence direct PPI network is available for protein ${normalizedProteinId} in the current dataset.`
+                : `Could not load neighbor network for protein ${normalizedProteinId}.`}
             </p>
+            {networkUnavailable ? (
+              <p className="mt-2 text-sm text-slate-400">
+                This protein may still appear in complex membership networks.
+              </p>
+            ) : null}
           </div>
         </div>
       </main>
