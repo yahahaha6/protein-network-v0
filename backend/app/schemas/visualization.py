@@ -45,12 +45,11 @@ ProteinCategory = Literal[
     "Unknown",
 ]
 
-EvidenceLevel = Literal[
-    "high",
-    "medium",
-    "low",
-    "co_complex_only",
-    "unknown",
+RelationKind = Literal[
+    "protein_physical_interaction",
+    "complex_subunit_pair_supported",
+    "complex_subunit_pair_co_membership_only",
+    "complex_external_partner",
 ]
 
 ExternalLinkType = Literal[
@@ -173,6 +172,7 @@ class VizEdge(BaseModel):
     source: str
     target: str
     type: EdgeType = "unknown"
+    relationKind: RelationKind
 
     label: Optional[str] = None
 
@@ -192,8 +192,10 @@ class VizEdge(BaseModel):
     isConfirmedPpi: bool = False
     isCoComplexOnly: bool = False
 
-    evidenceLevel: EvidenceLevel = "unknown"
     evidenceSummary: EvidenceSummary = Field(default_factory=EvidenceSummary)
+
+    complexId: Optional[str] = None
+    complexName: Optional[str] = None
 
     mediatingSubunits: List[MediatingSubunit] = Field(default_factory=list)
     externalPartnerId: Optional[str] = None
@@ -242,21 +244,12 @@ class NetworkStats(BaseModel):
     confirmedPpiEdgeCount: int = 0
     coComplexOnlyEdgeCount: int = 0
 
-    highEvidenceEdgeCount: int = 0
-    mediumEvidenceEdgeCount: int = 0
-    lowEvidenceEdgeCount: int = 0
-    unknownEvidenceEdgeCount: int = 0
-
-
 class LegendItem(BaseModel):
     """One visual legend entry used by the frontend."""
 
     key: str
     label: str
     description: Optional[str] = None
-    color: Optional[str] = None
-    shape: Optional[str] = None
-    lineStyle: Optional[str] = None
 
 
 class NetworkLegend(BaseModel):

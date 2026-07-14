@@ -169,13 +169,11 @@ def make_complex_ext_legend() -> NetworkLegend:
                 key="complex",
                 label="Center complex",
                 description="The queried CORUM complex that connects to external protein partners.",
-                color="slate",
             ),
             LegendItem(
                 key="protein",
                 label="External protein partner",
                 description="A protein outside the selected complex that connects through one or more mediating subunits.",
-                color="blue",
             ),
             LegendItem(
                 key="TF",
@@ -200,28 +198,9 @@ def make_complex_ext_legend() -> NetworkLegend:
         ],
         edgeEvidence=[
             LegendItem(
-                key="complex_external_ppi",
+                key="complex_external_partner",
                 label="Complex external PPI partner",
                 description="The complex connects to an external protein through one or more mediating subunit-level PPI relationships.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="other_complex",
-                label="Partner also appears in other complexes",
-                description="The external partner is annotated as a subunit of at least one other complex.",
-                lineStyle="dashed",
-            ),
-            LegendItem(
-                key="structural",
-                label="Structural / PDB-supported external partner",
-                description="The complex external relationship has supporting structural evidence.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="structural_other_complex",
-                label="PDB-supported and in other complexes",
-                description="The external partner has structural support and is also annotated in other complexes.",
-                lineStyle="solid",
             ),
         ],
         badges=[
@@ -296,29 +275,6 @@ def make_complex_ext_edge(
         ids=raw_mediating_subunit_ids,
         genes=raw_mediating_subunit_genes,
     )
-    mediating_subunit_ids = [subunit.id for subunit in mediating_subunits]
-    mediating_subunit_genes = [
-        subunit.gene for subunit in mediating_subunits if subunit.gene is not None
-    ]
-
-    edge_raw = {
-        **row,
-        "complexId": complex_id,
-        "complexName": complex_name,
-        "externalPartnerId": target_id,
-        "externalPartnerGene": external_partner_gene,
-        "extGeneName": external_partner_gene,
-        "mediatingSubunits": [
-            subunit.model_dump(mode="json") for subunit in mediating_subunits
-        ],
-        "mediatingSubunitIds": mediating_subunit_ids,
-        "mediatingSubunitGenes": mediating_subunit_genes,
-        "nMediatingSubunits": len(mediating_subunits),
-        "isSubunitOfOtherComplex": is_subunit_of_other_complex,
-        "otherComplexIds": other_complex_ids,
-        "relationshipKind": "complex_external_ppi",
-    }
-
     evidence = normalize_evidence(
         extract_evidence_input(row),
         is_confirmed_ppi=True,
@@ -330,8 +286,11 @@ def make_complex_ext_edge(
         source=source_id,
         target=target_id,
         type="complex_external_ppi",
+        relationKind="complex_external_partner",
         label="External PPI partner",
-        raw=edge_raw,
+        raw=dict(row),
+        complexId=complex_id,
+        complexName=complex_name,
         mediatingSubunits=mediating_subunits,
         externalPartnerId=target_id,
         externalPartnerGene=external_partner_gene,

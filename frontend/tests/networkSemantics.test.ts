@@ -46,16 +46,25 @@ describe("network semantic fixtures", () => {
     expect(model.complexExternalExplanation?.otherComplexIds).toEqual([]);
   });
 
-  it("retains raw-only complex external input as legacy compatibility", () => {
+  it("does not derive complex external semantics from graph or raw fallback", () => {
     const model = getEdgeSemanticModel(
       legacyRawOnlyComplexExternalEdge,
       getNetworkSemanticProfile("complex_ext")
     );
 
-    expect(model.kind).toBe("complex_external_partner");
-    expect(model.complexExternalExplanation?.externalPartnerGene).toBe(
-      "GENE_EXTERNAL"
+    expect(model.kind).toBe("unknown");
+    expect(model.complexExternalExplanation).toBeNull();
+  });
+
+  it("uses canonical relationKind without graph or raw inference", () => {
+    const model = getEdgeSemanticModel(
+      {
+        relationKind: "protein_physical_interaction",
+        raw: { relationshipKind: "complex_external_ppi" },
+      },
+      getNetworkSemanticProfile("unknown")
     );
-    expect(model.complexExternalExplanation?.nMediatingSubunits).toBe(1);
+
+    expect(model.kind).toBe("protein_ppi");
   });
 });

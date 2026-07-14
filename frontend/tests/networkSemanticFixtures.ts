@@ -3,6 +3,7 @@ export const coMembershipEdge = {
   source: "SYNTHETIC:PROTEIN_A",
   target: "SYNTHETIC:PROTEIN_B",
   type: "complex_intra_ppi",
+  relationKind: "complex_subunit_pair_co_membership_only",
   isConfirmedPpi: false,
   isCoComplexOnly: true,
   sharedComplexIds: ["SYNTHETIC:COMPLEX_A"],
@@ -16,6 +17,7 @@ export const coMembershipEdge = {
 export const standardComplexExternalEdge = {
   source: "SYNTHETIC:COMPLEX_A",
   target: "SYNTHETIC:EXTERNAL_PARTNER",
+  relationKind: "complex_external_partner",
   externalPartnerId: "SYNTHETIC:EXTERNAL_PARTNER",
   externalPartnerGene: "GENE_EXTERNAL",
   mediatingSubunits: [

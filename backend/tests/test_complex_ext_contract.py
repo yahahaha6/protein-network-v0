@@ -113,6 +113,7 @@ class ComplexExtContractTests(unittest.TestCase):
         self.assertEqual(edge.externalPartnerGene, "ARID1A")
         self.assertEqual(edge.otherComplexIds, ["1237", "1251"])
         self.assertIs(edge.isSubunitOfOtherComplex, True)
+        self.assertEqual(edge.relationKind, "complex_external_partner")
 
         self.assertEqual(
             [subunit.id for subunit in edge.mediatingSubunits],
@@ -121,11 +122,11 @@ class ComplexExtContractTests(unittest.TestCase):
         self.assertEqual(edge.mediatingSubunits[0].gene, "EZH2")
         self.assertEqual(edge.mediatingSubunits[0].displayName, "EZH2 / Q15910")
 
-        self.assertEqual(edge.raw["externalPartnerId"], "O14497")
-        self.assertEqual(edge.raw["externalPartnerGene"], "ARID1A")
-        self.assertEqual(edge.raw["mediatingSubunitIds"], ["Q15910", "Q09028"])
-        self.assertEqual(edge.raw["mediatingSubunitGenes"], ["EZH2", "RBBP4"])
-        self.assertEqual(edge.raw["relationshipKind"], "complex_external_ppi")
+        self.assertNotIn("externalPartnerId", edge.raw)
+        self.assertNotIn("externalPartnerGene", edge.raw)
+        self.assertNotIn("mediatingSubunitIds", edge.raw)
+        self.assertNotIn("mediatingSubunitGenes", edge.raw)
+        self.assertNotIn("relationshipKind", edge.raw)
 
     def test_other_complex_boolean_is_derived_from_explicit_true(self):
         edge = self.make_edge(
@@ -285,7 +286,8 @@ class ComplexExtContractTests(unittest.TestCase):
         self.assertIs(serialized_edge["isSubunitOfOtherComplex"], True)
         self.assertEqual(serialized_edge["otherComplexIds"], ["1237", "1251"])
         self.assertEqual(serialized_edge["mediatingSubunits"][0]["id"], "Q15910")
-        self.assertEqual(serialized_edge["raw"]["relationshipKind"], "complex_external_ppi")
+        self.assertEqual(serialized_edge["relationKind"], "complex_external_partner")
+        self.assertNotIn("relationshipKind", serialized_edge["raw"])
 
         invalid_legacy_keys = {"nodeTypes", "edgeTypes", "evidenceLevels"}
         self.assertTrue(invalid_legacy_keys.isdisjoint(serialized_legend.keys()))

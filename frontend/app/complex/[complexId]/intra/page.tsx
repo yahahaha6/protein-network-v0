@@ -356,19 +356,6 @@ export default async function ComplexIntraNetworkPage({
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-3 text-sm">
-            <span className="rounded-full border border-green-700 px-3 py-1 text-green-300">
-              green = confirmed intra-pair PPI
-            </span>
-
-            <span className="rounded-full border border-orange-700 px-3 py-1 text-orange-300">
-              orange dashed = co-complex-only
-            </span>
-
-            <span className="rounded-full border border-slate-700 px-3 py-1 text-slate-300">
-              edge labels hidden for readability
-            </span>
-          </div>
         </section>
 
         <NetworkGraph

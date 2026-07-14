@@ -117,34 +117,14 @@ def _complex_intra_legend() -> NetworkLegend:
         ],
         edgeEvidence=[
             LegendItem(
-                key="confirmed_ppi",
+                key="complex_subunit_pair_supported",
                 label="Confirmed direct PPI",
                 description="Two subunits share direct PPI evidence in the PPI graph.",
-                lineStyle="solid",
             ),
             LegendItem(
-                key="co_complex_only",
+                key="complex_subunit_pair_co_membership_only",
                 label="Co-complex only",
                 description="Two proteins are observed in the same complex, but no direct PPI evidence is available in the current data.",
-                lineStyle="dotted",
-            ),
-            LegendItem(
-                key="high",
-                label="High evidence",
-                description="Structural evidence, or DDI/DMI with publication support.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="medium",
-                label="Medium evidence",
-                description="Multiple sources, multiple publications, or multiple gold records.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="low",
-                label="Low evidence",
-                description="At least one source, method, or publication exists.",
-                lineStyle="solid",
             ),
         ],
         badges=[
@@ -186,14 +166,6 @@ def _make_complex_intra_stats(nodes: list[VizNode], edges: list[VizEdge]) -> Net
         ),
         confirmedPpiEdgeCount=sum(1 for edge in edges if edge.isConfirmedPpi),
         coComplexOnlyEdgeCount=sum(1 for edge in edges if edge.isCoComplexOnly),
-        highEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "high"),
-        mediumEvidenceEdgeCount=sum(
-            1 for edge in edges if edge.evidenceLevel == "medium"
-        ),
-        lowEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "low"),
-        unknownEvidenceEdgeCount=sum(
-            1 for edge in edges if edge.evidenceLevel == "unknown"
-        ),
     )
 
 
@@ -249,31 +221,19 @@ def _make_complex_intra_edge(
         is_co_complex_only=not is_confirmed_ppi,
     )
 
-    edge_raw = dict(row)
-    edge_raw.update(
-        {
-            "complexId": complex_id,
-            "evidenceInPpiGraph": is_confirmed_ppi,
-            "evidenceLabel": (
-                "已获直接 PPI 证据确认"
-                if is_confirmed_ppi
-                else "仅共存于同一复合物，暂无直接 PPI 证据"
-            ),
-            "sharedComplexCount": first_existing(
-                row,
-                ["shared_complex_count", "n_shared_complexes", "n_complexes_shared"],
-            ),
-            "normalizedRelationshipKind": edge_kind,
-        }
-    )
-
     return VizEdge(
         id=f"COMPLEX_INTRA|{edge_kind}|{complex_id}|{source_id}|{target_id}",
         source=source_id,
         target=target_id,
         type="complex_intra_ppi",
+        relationKind=(
+            "complex_subunit_pair_supported"
+            if is_confirmed_ppi
+            else "complex_subunit_pair_co_membership_only"
+        ),
         label=label,
-        raw=edge_raw,
+        raw=dict(row),
+        complexId=complex_id,
         **evidence,
     )
 
@@ -499,10 +459,6 @@ def _make_complex_ext_stats(nodes: list[VizNode], edges: list[VizEdge]) -> Netwo
         structuralEvidenceEdgeCount=sum(1 for edge in edges if edge.hasStructuralEvidence),
         confirmedPpiEdgeCount=sum(1 for edge in edges if edge.isConfirmedPpi),
         coComplexOnlyEdgeCount=sum(1 for edge in edges if edge.isCoComplexOnly),
-        highEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "high"),
-        mediumEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "medium"),
-        lowEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "low"),
-        unknownEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "unknown"),
     )
 
 

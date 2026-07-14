@@ -247,6 +247,54 @@ class EvidenceRouteMappingTests(unittest.TestCase):
                 self.assertTrue(edge.hasDDI)
                 self.assertTrue(edge.hasDMI)
 
+    def test_actual_builders_emit_canonical_relation_kinds(self):
+        direct = _make_protein_neighbor_edge(
+            row=self.make_tsv_row(gold_record_count=4),
+            source_id="SYNTHETIC:SOURCE",
+            target_id="SYNTHETIC:TARGET",
+        )
+        global_direct = _make_global_ppi_edge(
+            {
+                **self.make_tsv_row(gold_record_count=4),
+                "source": "SYNTHETIC:SOURCE",
+                "target": "SYNTHETIC:TARGET",
+            }
+        )
+        intra_supported = _make_complex_intra_edge(
+            complex_id="SYNTHETIC:COMPLEX",
+            row=self.make_tsv_row(),
+            source_id="SYNTHETIC:SOURCE",
+            target_id="SYNTHETIC:TARGET",
+            is_confirmed_ppi=True,
+        )
+        intra_co_membership = _make_complex_intra_edge(
+            complex_id="SYNTHETIC:COMPLEX",
+            row=self.make_tsv_row(),
+            source_id="SYNTHETIC:SOURCE",
+            target_id="SYNTHETIC:TARGET",
+            is_confirmed_ppi=False,
+        )
+        external = _make_complex_ext_edge(
+            complex_id="SYNTHETIC:COMPLEX",
+            row=self.make_tsv_row(),
+            source_id="CORUM:SYNTHETIC",
+            target_id="SYNTHETIC:TARGET",
+        )
+
+        self.assertEqual(direct.relationKind, "protein_physical_interaction")
+        self.assertEqual(global_direct.relationKind, "protein_physical_interaction")
+        self.assertEqual(
+            intra_supported.relationKind,
+            "complex_subunit_pair_supported",
+        )
+        self.assertEqual(
+            intra_co_membership.relationKind,
+            "complex_subunit_pair_co_membership_only",
+        )
+        self.assertEqual(external.relationKind, "complex_external_partner")
+        self.assertEqual(direct.evidenceSummary.goldRecordCount, 4)
+        self.assertEqual(global_direct.evidenceSummary.goldRecordCount, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

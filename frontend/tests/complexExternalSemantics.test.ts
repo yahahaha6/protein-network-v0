@@ -29,21 +29,21 @@ describe("complex external frontend semantics", () => {
     );
   });
 
-  it("uses legacy raw fallback only as compatibility when standard fields are absent", () => {
+  it("does not use raw fallback when standard fields are absent", () => {
     const explanation = getComplexExternalExplanationFields(
       legacyRawOnlyComplexExternalEdge
     );
 
-    expect(explanation.externalPartnerGene).toBe("GENE_EXTERNAL");
-    expect(explanation.mediatingSubunitIds).toEqual(["SYNTHETIC:MEDIATOR_A"]);
-    expect(explanation.mediatingSubunitGenes).toEqual(["GENE_A"]);
-    expect(explanation.nMediatingSubunits).toBe(1);
-    expect(explanation.isSubunitOfOtherComplex).toBe(true);
-    expect(explanation.otherComplexIds).toEqual(["SYNTHETIC:OTHER_COMPLEX_A"]);
+    expect(explanation.externalPartnerGene).toBeUndefined();
+    expect(explanation.mediatingSubunitIds).toBeUndefined();
+    expect(explanation.mediatingSubunitGenes).toBeUndefined();
+    expect(explanation.nMediatingSubunits).toBeUndefined();
+    expect(explanation.isSubunitOfOtherComplex).toBe(false);
+    expect(explanation.otherComplexIds).toBeUndefined();
 
     expect(
       getComplexExternalOtherComplexFlag(legacyRawOnlyComplexExternalEdge)
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("derives count from standard mediatingSubunits, not raw count", () => {

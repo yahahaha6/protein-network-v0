@@ -65,6 +65,7 @@ class EvidenceSemanticBaselineTests(unittest.TestCase):
             source="SYNTHETIC:SOURCE",
             target="SYNTHETIC:TARGET",
             type="ppi",
+            relationKind="protein_physical_interaction",
             **normalized,
         )
 

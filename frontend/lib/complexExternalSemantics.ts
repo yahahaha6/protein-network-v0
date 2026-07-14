@@ -15,28 +15,6 @@ export type ComplexExternalExplanationFields = {
 type ComplexExternalEdgeRecord = NetworkDetailRecord &
   Partial<ComplexExternalEdgeFields>;
 
-type ValueLookup = {
-  found: boolean;
-  value: unknown;
-};
-
-const EMPTY_TEXT_VALUES = new Set([
-  "",
-  "nan",
-  "none",
-  "null",
-  "undefined",
-  "n/a",
-  "na",
-  "no data",
-  "not available",
-  "missing",
-  "暂无数据",
-  "无数据",
-  "-",
-  "—",
-]);
-
 function isRecord(value: unknown): value is NetworkDetailRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -44,12 +22,7 @@ function isRecord(value: unknown): value is NetworkDetailRecord {
 function hasOwn(record: NetworkDetailRecord, key: string) {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
-
-function rawOf(record: NetworkDetailRecord): NetworkDetailRecord | null {
-  return isRecord(record.raw) ? record.raw : null;
-}
-
-function hasLegacySemanticValue(value: unknown): boolean {
+function hasCanonicalValue(value: unknown): boolean {
   if (value === null || value === undefined) {
     return false;
   }
@@ -63,7 +36,7 @@ function hasLegacySemanticValue(value: unknown): boolean {
   }
 
   if (typeof value === "string") {
-    return !EMPTY_TEXT_VALUES.has(value.trim().toLowerCase());
+    return value.trim() !== "";
   }
 
   if (Array.isArray(value)) {
@@ -97,64 +70,6 @@ function toBoolean(value: unknown): boolean {
   }
 
   return Boolean(value);
-}
-
-function firstStandardValue(
-  edge: NetworkDetailRecord,
-  keys: string[]
-): ValueLookup {
-  for (const key of keys) {
-    if (hasOwn(edge, key)) {
-      return {
-        found: true,
-        value: edge[key],
-      };
-    }
-  }
-
-  return {
-    found: false,
-    value: undefined,
-  };
-}
-
-function firstLegacyRawValue(
-  edge: NetworkDetailRecord,
-  keys: string[]
-): unknown {
-  const raw = rawOf(edge);
-
-  if (!raw) {
-    return undefined;
-  }
-
-  for (const key of keys) {
-    if (!hasOwn(raw, key)) {
-      continue;
-    }
-
-    const value = raw[key];
-
-    if (hasLegacySemanticValue(value)) {
-      return value;
-    }
-  }
-
-  return undefined;
-}
-
-function firstStandardThenLegacyRawValue(
-  edge: NetworkDetailRecord,
-  standardKeys: string[],
-  legacyRawKeys: string[]
-): unknown {
-  const standard = firstStandardValue(edge, standardKeys);
-
-  if (standard.found) {
-    return standard.value;
-  }
-
-  return firstLegacyRawValue(edge, legacyRawKeys);
 }
 
 function standardMediatingSubunitRecords(edge: ComplexExternalEdgeRecord) {
@@ -192,7 +107,7 @@ function standardMediatingSubunitFieldValues(
 
   return records
     .map((subunit) => subunit[field])
-    .filter(hasLegacySemanticValue)
+    .filter(hasCanonicalValue)
     .map(String);
 }
 
@@ -211,19 +126,9 @@ function standardMediatingSubunitCount(
 export function getComplexExternalOtherComplexFlag(
   edge: ComplexExternalEdgeRecord
 ): boolean {
-  const standard = firstStandardValue(edge, ["isSubunitOfOtherComplex"]);
-
-  if (standard.found) {
-    return toBoolean(standard.value);
-  }
-
-  return toBoolean(
-    firstLegacyRawValue(edge, [
-      "isSubunitOfOtherComplex",
-      "is_subunit_of_other_complex",
-      "is_subunit_of_complex",
-    ])
-  );
+  return hasOwn(edge, "isSubunitOfOtherComplex")
+    ? toBoolean(edge.isSubunitOfOtherComplex)
+    : false;
 }
 
 export function getComplexExternalExplanationFields(
@@ -231,38 +136,12 @@ export function getComplexExternalExplanationFields(
   options: { isSubunitOfOtherComplex?: boolean } = {}
 ): ComplexExternalExplanationFields {
   return {
-    externalPartnerGene: firstStandardThenLegacyRawValue(
-      edge,
-      ["externalPartnerGene"],
-      ["externalPartnerGene", "extGeneName", "targetGene", "target"]
-    ),
-    mediatingSubunitIds:
-      standardMediatingSubunitFieldValues(edge, "id") ??
-      firstStandardThenLegacyRawValue(
-        edge,
-        ["mediatingSubunitIds"],
-        ["mediatingSubunitIds", "mediating_subunit_ids"]
-      ),
-    mediatingSubunitGenes:
-      standardMediatingSubunitFieldValues(edge, "gene") ??
-      firstStandardThenLegacyRawValue(
-        edge,
-        ["mediatingSubunitGenes"],
-        ["mediatingSubunitGenes", "mediating_subunit_genes"]
-      ),
-    nMediatingSubunits:
-      standardMediatingSubunitCount(edge) ??
-      firstStandardThenLegacyRawValue(
-        edge,
-        ["nMediatingSubunits"],
-        ["nMediatingSubunits", "n_mediating_subunits"]
-      ),
+    externalPartnerGene: edge.externalPartnerGene,
+    mediatingSubunitIds: standardMediatingSubunitFieldValues(edge, "id"),
+    mediatingSubunitGenes: standardMediatingSubunitFieldValues(edge, "gene"),
+    nMediatingSubunits: standardMediatingSubunitCount(edge),
     isSubunitOfOtherComplex:
       options.isSubunitOfOtherComplex ?? getComplexExternalOtherComplexFlag(edge),
-    otherComplexIds: firstStandardThenLegacyRawValue(
-      edge,
-      ["otherComplexIds"],
-      ["otherComplexIds", "other_complex_ids"]
-    ),
+    otherComplexIds: edge.otherComplexIds,
   };
 }

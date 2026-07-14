@@ -1,27 +1,33 @@
 "use client";
 
-import type { ComplexExternalEdgeFields } from "@/lib/networkTypes";
-
 import cytoscape from "cytoscape";
-import type { Core, EdgeSingular, ElementDefinition, LayoutOptions, NodeSingular } from "cytoscape";
+import type {
+  Core,
+  EdgeSingular,
+  ElementDefinition,
+  LayoutOptions,
+  NodeSingular,
+} from "cytoscape";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+
 import DetailFields from "./DetailFields";
 import ExpressionProfileCard from "./ExpressionProfileCard";
 import NetworkAttributeTable from "./NetworkAttributeTable";
-import {
-  getEdgeSemanticModel,
-  getNetworkSemanticProfile,
-} from "@/lib/networkSemantics";
+import { buildEdgeDetailViewModel } from "@/lib/edgeDetailViewModel";
 import {
   formatCompactDetailValue,
   toDetailListPreview,
 } from "@/lib/detailPresentation";
 import {
   getEdgeLegendItems,
-  getEdgePresentationClasses,
+  getRelationPresentation,
   MANAGED_EDGE_PRESENTATION_CLASSES,
 } from "@/lib/networkPresentation";
+import type {
+  CanonicalNetworkEdge,
+  RelationKind,
+} from "@/lib/networkTypes";
 
 type DetailRecord = Record<string, unknown>;
 
@@ -44,27 +50,11 @@ type StandardVizNode = {
   raw?: DetailRecord;
 };
 
-type StandardVizEdge = ComplexExternalEdgeFields & {
+type StandardVizEdge = Partial<CanonicalNetworkEdge> & {
   id: string;
   source: string;
   target: string;
   type?: string;
-  label?: string | null;
-  evidenceSources?: string[];
-  hpaDatasets?: string[];
-  methods?: string[];
-  publications?: string[];
-  supportingStructures?: string[];
-  ddi?: string[];
-  dmi?: string[];
-  hasDDI?: boolean;
-  hasDMI?: boolean;
-  hasStructuralEvidence?: boolean;
-  isConfirmedPpi?: boolean;
-  isCoComplexOnly?: boolean;
-  evidenceLevel?: string;
-  evidenceSummary?: unknown;
-  externalLinks?: unknown[];
   raw?: DetailRecord;
 };
 
@@ -90,14 +80,6 @@ type StandardNetworkResponse = {
   center?: StandardVizNode | LegacyNetworkNode | null;
   nodes: Array<StandardVizNode | LegacyNetworkNode | ElementDefinition>;
   edges: Array<StandardVizEdge | LegacyNetworkEdge | ElementDefinition>;
-  stats?: unknown;
-  legend?: unknown;
-  pagination?: unknown;
-  filters?: unknown;
-  warnings?: string[];
-  total?: number;
-  total_edges?: number;
-  truncated?: boolean;
 };
 
 type NetworkGraphInput = NetworkElements | StandardNetworkResponse;
@@ -113,15 +95,20 @@ type NetworkGraphProps = {
 };
 
 type SelectedElement =
-  | {
-      kind: "node";
-      data: DetailRecord;
-    }
-  | {
-      kind: "edge";
-      data: DetailRecord;
-    }
+  | { kind: "node"; data: DetailRecord }
+  | { kind: "edge"; data: DetailRecord }
   | null;
+
+const RELATION_KINDS = new Set<RelationKind>([
+  "protein_physical_interaction",
+  "complex_subunit_pair_supported",
+  "complex_subunit_pair_co_membership_only",
+  "complex_external_partner",
+]);
+
+function isRelationKind(value: unknown): value is RelationKind {
+  return typeof value === "string" && RELATION_KINDS.has(value as RelationKind);
+}
 
 function getNodeHref(
   data: DetailRecord,
@@ -133,16 +120,13 @@ function getNodeHref(
   if (rawType.includes("protein") || rawId.startsWith("UniProt:")) {
     const proteinId = rawId.replace("UniProt:", "");
 
-    if (mode === "global-ppi") {
-      return `/global-ppi/protein/${proteinId}/network`;
-    }
-
-    return `/protein/${proteinId}`;
+    return mode === "global-ppi"
+      ? `/global-ppi/protein/${proteinId}/network`
+      : `/protein/${proteinId}`;
   }
 
   if (rawType.includes("complex") || rawId.startsWith("CORUM:")) {
-    const complexId = rawId.replace("CORUM:", "");
-    return `/complex/${complexId}`;
+    return `/complex/${rawId.replace("CORUM:", "")}`;
   }
 
   return null;
@@ -153,13 +137,9 @@ function stripKnownIdPrefix(value: string) {
 }
 
 function idsMatch(left: string, right?: string) {
-  if (!right) {
-    return false;
-  }
-
-  return (
-    left === right ||
-    stripKnownIdPrefix(left) === stripKnownIdPrefix(right)
+  return Boolean(
+    right &&
+      (left === right || stripKnownIdPrefix(left) === stripKnownIdPrefix(right))
   );
 }
 
@@ -179,7 +159,14 @@ function isCytoscapeElementInput(
   );
 }
 
-function getElementData(item: StandardVizNode | StandardVizEdge | LegacyNetworkNode | LegacyNetworkEdge | ElementDefinition) {
+function getElementData(
+  item:
+    | StandardVizNode
+    | StandardVizEdge
+    | LegacyNetworkNode
+    | LegacyNetworkEdge
+    | ElementDefinition
+) {
   if (
     typeof item === "object" &&
     item !== null &&
@@ -194,18 +181,8 @@ function getElementData(item: StandardVizNode | StandardVizEdge | LegacyNetworkN
 }
 
 function standardNodeTypeForCytoscape(node: StandardVizNode) {
-  const badges = node.badges ?? [];
-
-  if (badges.includes("CENTER")) {
+  if (node.badges?.includes("CENTER")) {
     return "CenterProtein";
-  }
-
-  if (node.type === "complex") {
-    return "Complex";
-  }
-
-  if (node.type === "protein") {
-    return "Protein";
   }
 
   return node.type || "Unknown";
@@ -219,23 +196,19 @@ function toNetworkElements(elements: NetworkGraphInput): NetworkElements {
   return {
     nodes: elements.nodes.map((node) => {
       const data = getElementData(node);
-      const normalizedNode = data as unknown as StandardVizNode;
-      const nodeType = standardNodeTypeForCytoscape(normalizedNode);
+      const normalizedNode = data as StandardVizNode;
 
       return {
         data: {
           ...data,
-          id: String(normalizedNode.id || data.id || ""),
-          label: String(normalizedNode.label || data.label || normalizedNode.id || data.id || ""),
-          type: nodeType,
-          nodeType: normalizedNode.type || data.nodeType,
-          displayName: normalizedNode.displayName || data.displayName,
-          category:
-            normalizedNode.proteinCategory ||
-            String(data.proteinCategory || data.category || "Unknown"),
-          proteinCategory:
-            normalizedNode.proteinCategory ||
-            String(data.proteinCategory || data.category || "Unknown"),
+          id: String(normalizedNode.id ?? data.id ?? ""),
+          label: String(
+            normalizedNode.label ?? data.label ?? normalizedNode.id ?? data.id ?? ""
+          ),
+          type: standardNodeTypeForCytoscape(normalizedNode),
+          nodeType: normalizedNode.type ?? data.nodeType,
+          displayName: normalizedNode.displayName ?? data.displayName,
+          proteinCategory: normalizedNode.proteinCategory ?? data.proteinCategory,
           badges: normalizedNode.badges ?? data.badges ?? [],
           hpaProfile: normalizedNode.hpaProfile ?? data.hpaProfile,
           externalLinks: normalizedNode.externalLinks ?? data.externalLinks ?? [],
@@ -247,76 +220,39 @@ function toNetworkElements(elements: NetworkGraphInput): NetworkElements {
     }),
     edges: elements.edges.map((edge) => {
       const data = getElementData(edge);
-      const normalizedEdge = data as unknown as StandardVizEdge;
+      const normalizedEdge = data as StandardVizEdge;
 
       return {
         data: {
           ...data,
-          id: String(normalizedEdge.id || data.id || `${data.source || ""}-${data.target || ""}`),
-          source: String(normalizedEdge.source || data.source || ""),
-          target: String(normalizedEdge.target || data.target || ""),
-          type: normalizedEdge.type || String(data.type || "ppi"),
-          relationshipType:
-            normalizedEdge.type ||
-            String(data.relationshipType || data.type || "ppi"),
-          label:
-            normalizedEdge.label ||
-            String(data.label || data.relationshipType || data.type || "ppi"),
+          id: String(
+            normalizedEdge.id ?? data.id ?? `${data.source ?? ""}-${data.target ?? ""}`
+          ),
+          source: String(normalizedEdge.source ?? data.source ?? ""),
+          target: String(normalizedEdge.target ?? data.target ?? ""),
+          type: normalizedEdge.type ?? data.type,
+          relationKind: normalizedEdge.relationKind ?? data.relationKind,
+          label: normalizedEdge.label ?? data.label,
           evidenceSources:
-            normalizedEdge.evidenceSources ??
-            (data.evidenceSources as string[] | undefined) ??
-            (data.sources as string[] | undefined) ??
-            [],
-          sources:
-            normalizedEdge.evidenceSources ??
-            (data.evidenceSources as string[] | undefined) ??
-            (data.sources as string[] | undefined) ??
-            [],
-          hpaDatasets:
-            normalizedEdge.hpaDatasets ??
-            (data.hpaDatasets as string[] | undefined) ??
-            (data.hpa_datasets as string[] | undefined) ??
-            [],
-          hpa_datasets:
-            normalizedEdge.hpaDatasets ??
-            (data.hpaDatasets as string[] | undefined) ??
-            (data.hpa_datasets as string[] | undefined) ??
-            [],
-          methods: normalizedEdge.methods ?? (data.methods as string[] | undefined) ?? [],
-          publications:
-            normalizedEdge.publications ??
-            (data.publications as string[] | undefined) ??
-            [],
+            normalizedEdge.evidenceSources ?? data.evidenceSources ?? [],
+          methods: normalizedEdge.methods ?? data.methods ?? [],
+          publications: normalizedEdge.publications ?? data.publications ?? [],
           supportingStructures:
-            normalizedEdge.supportingStructures ??
-            (data.supportingStructures as string[] | undefined) ??
-            (data.supporting_structures as string[] | undefined) ??
-            [],
-          supporting_structures:
-            normalizedEdge.supportingStructures ??
-            (data.supportingStructures as string[] | undefined) ??
-            (data.supporting_structures as string[] | undefined) ??
-            [],
-          ddi: normalizedEdge.ddi ?? (data.ddi as string[] | undefined) ?? [],
-          dmi: normalizedEdge.dmi ?? (data.dmi as string[] | undefined) ?? [],
-          hasDDI: Boolean(normalizedEdge.hasDDI ?? data.hasDDI),
-          hasDMI: Boolean(normalizedEdge.hasDMI ?? data.hasDMI),
-          hasStructuralEvidence: Boolean(
-            normalizedEdge.hasStructuralEvidence ?? data.hasStructuralEvidence
-          ),
-          isConfirmedPpi: Boolean(
-            normalizedEdge.isConfirmedPpi ?? data.isConfirmedPpi
-          ),
-          isCoComplexOnly: Boolean(
-            normalizedEdge.isCoComplexOnly ?? data.isCoComplexOnly
-          ),
-          evidenceLevel:
-            normalizedEdge.evidenceLevel || String(data.evidenceLevel || "unknown"),
-          evidenceSummary: normalizedEdge.evidenceSummary ?? data.evidenceSummary,
+            normalizedEdge.supportingStructures ?? data.supportingStructures ?? [],
+          ddi: normalizedEdge.ddi ?? data.ddi ?? [],
+          dmi: normalizedEdge.dmi ?? data.dmi ?? [],
+          hasDDI: normalizedEdge.hasDDI ?? data.hasDDI ?? false,
+          hasDMI: normalizedEdge.hasDMI ?? data.hasDMI ?? false,
+          hasStructuralEvidence:
+            normalizedEdge.hasStructuralEvidence ?? data.hasStructuralEvidence ?? false,
+          isConfirmedPpi:
+            normalizedEdge.isConfirmedPpi ?? data.isConfirmedPpi ?? false,
+          isCoComplexOnly:
+            normalizedEdge.isCoComplexOnly ?? data.isCoComplexOnly ?? false,
+          evidenceSummary:
+            normalizedEdge.evidenceSummary ?? data.evidenceSummary ?? undefined,
           externalLinks:
-            normalizedEdge.externalLinks ??
-            (data.externalLinks as unknown[] | undefined) ??
-            [],
+            normalizedEdge.externalLinks ?? data.externalLinks ?? [],
           raw: normalizedEdge.raw ?? data.raw ?? {},
         },
       };
@@ -334,24 +270,10 @@ function addFocusToElements(
 
   return {
     nodes: elements.nodes.map((node) => {
-      const nodeData = { ...(node.data ?? {}) } as DetailRecord;
-      const nodeId = String(nodeData.id || "");
-      const nodeLabel = String(nodeData.label || "");
+      const data = { ...(node.data ?? {}) } as DetailRecord;
+      data.isFocus = idsMatch(String(data.id ?? ""), focusNodeId) ? "true" : "false";
 
-      const isFocus =
-        idsMatch(nodeId, focusNodeId) ||
-        idsMatch(nodeLabel, focusNodeId);
-
-      if (isFocus) {
-        nodeData.isFocus = "true";
-      } else {
-        delete nodeData.isFocus;
-      }
-
-      return {
-        ...node,
-        data: nodeData,
-      };
+      return { ...node, data };
     }),
     edges: elements.edges,
   };
@@ -364,137 +286,18 @@ function makeSafeFileName(name: string) {
     .replace(/^_+|_+$/g, "");
 }
 
-function firstDefined(data: DetailRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = data[key];
-
-    if (value !== undefined && value !== null && value !== "") {
-      return value;
-    }
-  }
-
-  return undefined;
-}
-
-function buildEdgeDetailData(edgeData: DetailRecord): DetailRecord {
-  const preferredData: DetailRecord = {
-    source: firstDefined(edgeData, [
-      "source_protein",
-      "sourceProtein",
-      "source_name",
-      "sourceName",
-      "source",
-    ]),
-    target: firstDefined(edgeData, [
-      "target_protein",
-      "targetProtein",
-      "target_name",
-      "targetName",
-      "target",
-    ]),
-    type: firstDefined(edgeData, [
-      "relationship_type",
-      "relationshipType",
-      "edge_type",
-      "edgeType",
-      "type",
-    ]),
-    sources: firstDefined(edgeData, ["sources", "source_database", "sourceDatabase"]),
-    methods: firstDefined(edgeData, ["methods", "method"]),
-    publications: firstDefined(edgeData, ["publications", "publication", "pubmed_ids", "pubmedIds"]),
-    supporting_structures: firstDefined(edgeData, [
-      "supporting_structures",
-      "supportingStructures",
-      "structures",
-    ]),
-    gold_record_count: firstDefined(edgeData, [
-      "gold_record_count",
-      "goldRecordCount",
-      "record_count",
-      "recordCount",
-    ]),
-        ddi: firstDefined(edgeData, [
-      "ddi",
-      "DDI",
-      "domain_domain_interactions",
-      "domainDomainInteractions",
-    ]),
-    dmi: firstDefined(edgeData, [
-      "dmi",
-      "DMI",
-      "domain_motif_interactions",
-      "domainMotifInteractions",
-    ]),
-  };
-
-  const consumedKeys = new Set([
-    "source",
-    "source_protein",
-    "sourceProtein",
-    "source_name",
-    "sourceName",
-    "target",
-    "target_protein",
-    "targetProtein",
-    "target_name",
-    "targetName",
-    "type",
-    "relationship_type",
-    "relationshipType",
-    "edge_type",
-    "edgeType",
-    "sources",
-    "source_database",
-    "sourceDatabase",
-    "methods",
-    "method",
-    "publications",
-    "publication",
-    "pubmed_ids",
-    "pubmedIds",
-    "supporting_structures",
-    "supportingStructures",
-    "structures",
-    "gold_record_count",
-    "goldRecordCount",
-    "record_count",
-    "recordCount",
-        "ddi",
-    "DDI",
-    "domain_domain_interactions",
-    "domainDomainInteractions",
-    "dmi",
-    "DMI",
-    "domain_motif_interactions",
-    "domainMotifInteractions",
-  ]);
-
-  const extraData: DetailRecord = {};
-
-  for (const [key, value] of Object.entries(edgeData)) {
-    if (!consumedKeys.has(key)) {
-      extraData[key] = value;
-    }
-  }
-
-  return {
-    ...preferredData,
-    ...extraData,
-  };
-}
-
-
 function toExternalLinks(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value
-    .map((item) => item as Record<string, unknown>)
-    .filter((item) => item && typeof item.url === "string");
+  return value.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === "object" && typeof item.url === "string"
+  );
 }
 
-function renderValueList(value: unknown, emptyLabel = "None") {
+function renderValueList(value: unknown, emptyLabel: string) {
   const preview = toDetailListPreview(value, { maxItems: 12 });
 
   if (preview.items.length === 0) {
@@ -510,7 +313,6 @@ function renderValueList(value: unknown, emptyLabel = "None") {
           </li>
         ))}
       </ul>
-
       {preview.hiddenCount > 0 && (
         <p className="text-xs font-medium text-slate-500">
           + {preview.hiddenCount} more
@@ -537,7 +339,7 @@ function renderExternalLinks(value: unknown) {
             rel="noreferrer"
             className="break-words text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline"
           >
-            {String(link.label || link.url)}
+            {String(link.label ?? link.url)}
           </a>
         </li>
       ))}
@@ -545,127 +347,26 @@ function renderExternalLinks(value: unknown) {
   );
 }
 
-function renderStatusBadge(
-  active: boolean,
-  activeLabel: string,
-  inactiveLabel: string,
-  key?: string
-) {
+function DetailCard({ label, value }: { label: string; value: unknown }) {
   return (
-    <span
-      key={key}
-      className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-xs font-semibold ${
-        active
-          ? "border-emerald-700 bg-emerald-950/40 text-emerald-300"
-          : "border-slate-700 bg-slate-950/50 text-slate-400"
-      }`}
-    >
-      {active ? activeLabel : inactiveLabel}
-    </span>
+    <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1 break-words font-medium text-slate-200">
+        {formatCompactDetailValue(value)}
+      </p>
+    </div>
   );
 }
 
-function evidenceLevelLabel(value: unknown) {
-  const text = String(value || "unknown").replace(/_/g, " ");
-
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-
-function cleanNodeId(value: unknown) {
-  return String(value || "").replace("UniProt:", "").replace("CORUM:", "");
-}
-
-function getEndpointDisplay(edgeData: DetailRecord, side: "source" | "target") {
-  const label =
-    side === "source"
-      ? firstDefined(edgeData, [
-          "source_node_label",
-          "sourceLabel",
-          "source_label",
-          "source_name",
-          "sourceName",
-          "source_protein",
-          "sourceProtein",
-        ])
-      : firstDefined(edgeData, [
-          "target_node_label",
-          "targetLabel",
-          "target_label",
-          "target_name",
-          "targetName",
-          "target_protein",
-          "targetProtein",
-        ]);
-
-  const id =
-    side === "source"
-      ? firstDefined(edgeData, [
-          "source_node_id",
-          "source",
-          "source_id",
-          "sourceId",
-          "source_uniprot",
-          "sourceUniProt",
-        ])
-      : firstDefined(edgeData, [
-          "target_node_id",
-          "target",
-          "target_id",
-          "targetId",
-          "target_uniprot",
-          "targetUniProt",
-        ]);
-
-  const cleanedLabel = String(label || "").trim();
-  const cleanedId = cleanNodeId(id).trim();
-
-  if (cleanedLabel && cleanedId && cleanedLabel !== cleanedId) {
-    return `${cleanedLabel} / ${cleanedId}`;
-  }
-
-  if (cleanedLabel) {
-    return cleanedLabel;
-  }
-
-  if (cleanedId) {
-    return cleanedId;
-  }
-
-  return side === "source" ? "Unknown source" : "Unknown target";
-}
-
-function getEdgeTitle(edgeData: DetailRecord) {
-  const source = getEndpointDisplay(edgeData, "source");
-  const target = getEndpointDisplay(edgeData, "target");
-
-  const type = String(
-    firstDefined(edgeData, ["relationship_type", "relationshipType", "type"]) ||
-      ""
-  );
-
-  if (type) {
-    return `${source} → ${target} (${type})`;
-  }
-
-  return `${source} → ${target}`;
-}
-function formatSummaryValue(value: unknown) {
-  return formatCompactDetailValue(value);
-}
-function applyEdgeEvidenceClasses(cy: Core, graphType?: string) {
-  const semanticProfile = getNetworkSemanticProfile(graphType);
+function applyRelationPresentationClasses(cy: Core) {
   const managedClasses = MANAGED_EDGE_PRESENTATION_CLASSES.join(" ");
 
   cy.edges().forEach((edge) => {
-    const edgeData = edge.data() as DetailRecord;
-    const semanticModel = getEdgeSemanticModel(edgeData, semanticProfile);
-    const presentationClasses = getEdgePresentationClasses(semanticModel);
-
+    const relationKind = edge.data("relationKind");
     edge.removeClass(managedClasses);
 
-    if (presentationClasses.length > 0) {
-      edge.addClass(presentationClasses.join(" "));
+    if (isRelationKind(relationKind)) {
+      edge.addClass(getRelationPresentation(relationKind).edgeClassName);
     }
   });
 }
@@ -691,29 +392,17 @@ const networkStyle = [
       "overlay-opacity": 0,
     },
   },
-    {
-    selector:
-      'node[protein_category = "TF"], node[proteinCategory = "TF"], node[category = "TF"], node[protein_category = "tf"], node[proteinCategory = "tf"], node[category = "tf"]',
-    style: {
-      "background-color": "#22c55e",
-      "border-color": "#86efac",
-    },
+  {
+    selector: 'node[proteinCategory = "TF"]',
+    style: { "background-color": "#22c55e", "border-color": "#86efac" },
   },
   {
-    selector:
-      'node[protein_category = "EF"], node[proteinCategory = "EF"], node[category = "EF"], node[protein_category = "ef"], node[proteinCategory = "ef"], node[category = "ef"]',
-    style: {
-      "background-color": "#38bdf8",
-      "border-color": "#bae6fd",
-    },
+    selector: 'node[proteinCategory = "EF"]',
+    style: { "background-color": "#38bdf8", "border-color": "#bae6fd" },
   },
   {
-    selector:
-      'node[protein_category = "TF_and_EF"], node[proteinCategory = "TF_and_EF"], node[category = "TF_and_EF"], node[protein_category = "TF_AND_EF"], node[proteinCategory = "TF_AND_EF"], node[category = "TF_AND_EF"], node[protein_category = "tf_and_ef"], node[proteinCategory = "tf_and_ef"], node[category = "tf_and_ef"], node[protein_category = "TF/EF"], node[proteinCategory = "TF/EF"], node[category = "TF/EF"]',
-    style: {
-      "background-color": "#f97316",
-      "border-color": "#fed7aa",
-    },
+    selector: 'node[proteinCategory = "TF_and_EF"]',
+    style: { "background-color": "#f97316", "border-color": "#fed7aa" },
   },
   {
     selector: 'node[isFocus = "true"]',
@@ -723,17 +412,8 @@ const networkStyle = [
       "background-color": "#facc15",
       "border-width": 4,
       "border-color": "#fde68a",
-      color: "#f8fafc",
       "font-size": 12,
       "font-weight": 800,
-    },
-  },
-  {
-    selector: "node:selected",
-    style: {
-      "border-width": 5,
-      "border-color": "#f8fafc",
-      "background-color": "#0ea5e9",
     },
   },
   {
@@ -747,10 +427,19 @@ const networkStyle = [
     },
   },
   {
+    selector: "node:selected",
+    style: {
+      "border-width": 5,
+      "border-color": "#f8fafc",
+      "background-color": "#0ea5e9",
+    },
+  },
+  {
     selector: "edge",
     style: {
       width: 1.5,
       "line-color": "#64748b",
+      "line-style": "solid",
       opacity: 0.75,
       "curve-style": "bezier",
       "target-arrow-shape": "none",
@@ -759,17 +448,33 @@ const networkStyle = [
     },
   },
   {
+    selector: "edge.edge-relation-protein-physical-interaction",
+    style: { width: 2, "line-color": "#38bdf8", "line-style": "solid", opacity: 0.9 },
+  },
+  {
+    selector: "edge.edge-relation-complex-subunit-pair-supported",
+    style: { width: 2.2, "line-color": "#34d399", "line-style": "solid", opacity: 0.95 },
+  },
+  {
+    selector: "edge.edge-relation-complex-subunit-pair-co-membership-only",
+    style: { width: 2.2, "line-color": "#fb923c", "line-style": "dashed", opacity: 0.9 },
+  },
+  {
+    selector: "edge.edge-relation-complex-external-partner",
+    style: { width: 2.2, "line-color": "#a78bfa", "line-style": "solid", opacity: 0.9 },
+  },
+  {
     selector: "edge:selected",
-    style: {
-      width: 4,
-      "line-color": "#f8fafc",
-      opacity: 1,
-    },
+    style: { width: 4, "line-color": "#f8fafc", opacity: 1 },
+  },
+  {
+    selector: "edge.edge-relation-complex-subunit-pair-co-membership-only:selected",
+    style: { "line-style": "dashed" },
   },
   {
     selector: "edge.show-label",
     style: {
-      label: "data(type)",
+      label: "data(label)",
       "font-size": 7,
       color: "#94a3b8",
       "text-rotation": "autorotate",
@@ -778,184 +483,7 @@ const networkStyle = [
       "text-outline-color": "#020617",
     },
   },
-  {
-    selector: 'edge[type = "INTRA_PAIR_CONFIRMED"]',
-    style: {
-      width: 2.2,
-      "line-color": "#22c55e",
-      opacity: 0.9,
-    },
-  },
-  {
-    selector: 'edge[type = "intra_pair_confirmed"]',
-    style: {
-      width: 2.2,
-      "line-color": "#22c55e",
-      opacity: 0.9,
-    },
-  },
-  {
-    selector: 'edge[type = "DIRECT_PPI"]',
-    style: {
-      width: 2,
-      "line-color": "#38bdf8",
-      opacity: 0.85,
-    },
-  },
-  {
-    selector: 'edge[type = "direct_ppi"]',
-    style: {
-      width: 2,
-      "line-color": "#38bdf8",
-      opacity: 0.85,
-    },
-  },
-  {
-    selector: 'edge[type = "CO_COMPLEX_ONLY"]',
-    style: {
-      "line-style": "dashed",
-      "line-color": "#f97316",
-      opacity: 0.85,
-    },
-  },
-  {
-    selector: 'edge[type = "co-complex-only"]',
-    style: {
-      "line-style": "dashed",
-      "line-color": "#f97316",
-      opacity: 0.85,
-    },
-  },
-    {
-    selector: 'edge[type = "co_complex_only"]',
-    style: {
-      "line-style": "dashed",
-      "line-color": "#f97316",
-    },
-  },
-  {
-    selector: "edge.has-ddi",
-    style: {
-      width: 3,
-      "line-color": "#ec4899",
-      opacity: 0.95,
-    },
-  },
-  {
-    selector: "edge.has-dmi",
-    style: {
-      width: 3,
-      "line-color": "#8b5cf6",
-      opacity: 0.95,
-    },
-  },
-  {
-    selector: "edge.has-ddi-dmi",
-    style: {
-      width: 4,
-      "line-color": "#facc15",
-      opacity: 1,
-    },
-  },
-  {
-    selector: "edge.edge-role-complex-ext-base",
-    style: {
-      width: 2.2,
-      "line-color": "#38bdf8",
-      "line-style": "solid",
-      opacity: 0.9,
-    },
-  },
-  {
-    selector: "edge.edge-role-complex-ext-other-complex",
-    style: {
-      width: 3.2,
-      "line-color": "#a855f7",
-      "line-style": "dashed",
-      opacity: 0.95,
-    },
-  },
-  {
-    selector: "edge.edge-role-complex-ext-structural",
-    style: {
-      width: 5,
-      "line-color": "#f59e0b",
-      "line-style": "solid",
-      opacity: 1,
-    },
-  },
-  {
-    selector: "edge.edge-role-complex-ext-structural-other-complex",
-    style: {
-      width: 5,
-      "line-color": "#f97316",
-      "line-style": "dashed",
-      opacity: 1,
-    },
-  },
-  {
-    selector: "edge:selected",
-    style: {
-      width: 5,
-      "line-color": "#f8fafc",
-      opacity: 1,
-    },
-  },  {
-    selector: "edge.has-structural-evidence",
-    style: {
-      width: 5,
-      "line-style": "solid",
-    },
-  },
-  {
-    selector: "edge.confirmed-ppi",
-    style: {
-      "line-style": "solid",
-      opacity: 0.95,
-    },
-  },
-  {
-    selector: "edge.co-complex-only",
-    style: {
-      "line-style": "dashed",
-      opacity: 0.65,
-    },
-  },
-  {
-    selector: "edge.evidence-co-complex-only",
-    style: {
-      "line-style": "dashed",
-      opacity: 0.65,
-    },
-  },
-  {
-    selector: "edge.evidence-high",
-    style: {
-      width: 5,
-    },
-  },
-  {
-    selector: "edge.evidence-medium",
-    style: {
-      width: 3,
-    },
-  },
-  {
-    selector: "edge.evidence-low",
-    style: {
-      opacity: 0.8,
-    },
-  },
-  {
-    selector: "edge.evidence-unknown",
-    style: {
-      "line-style": "dotted",
-      opacity: 0.55,
-    },
-  },
-
 ] as cytoscape.StylesheetJson;
-
 
 function getLayoutOptions(layoutName: NetworkGraphProps["layoutName"]) {
   if (layoutName === "concentric") {
@@ -965,22 +493,13 @@ function getLayoutOptions(layoutName: NetworkGraphProps["layoutName"]) {
       padding: 120,
       animate: false,
       minNodeSpacing: 85,
-      concentric: function (node: NodeSingular) {
-        return node.data("isFocus") ? 10 : 1;
-      },
-      levelWidth: function () {
-        return 1;
-      },
+      concentric: (node: NodeSingular) => (node.data("isFocus") ? 10 : 1),
+      levelWidth: () => 1,
     } as LayoutOptions;
   }
 
   if (layoutName === "circle") {
-    return {
-      name: "circle",
-      fit: true,
-      padding: 80,
-      animate: false,
-    } as LayoutOptions;
+    return { name: "circle", fit: true, padding: 80, animate: false } as LayoutOptions;
   }
 
   return {
@@ -1006,67 +525,44 @@ export default function NetworkGraph({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
   const router = useRouter();
-
   const graphElements = useMemo(() => toNetworkElements(elements), [elements]);
-
   const [selectedElement, setSelectedElement] = useState<SelectedElement>(null);
 
-  const graphType =
-    typeof (elements as { graphType?: unknown }).graphType === "string"
-      ? String((elements as { graphType?: unknown }).graphType)
-      : undefined;
+  const edgeLegendItems = useMemo(() => {
+    const relationKinds = graphElements.edges
+      .map((edge) => (edge.data as DetailRecord | undefined)?.relationKind)
+      .filter(isRelationKind);
 
-  const semanticProfile = getNetworkSemanticProfile(graphType);
-  const edgeLegendItems = getEdgeLegendItems(semanticProfile);
+    return getEdgeLegendItems(relationKinds);
+  }, [graphElements.edges]);
 
   const selectedNodeData =
     selectedElement?.kind === "node" ? selectedElement.data : null;
-
-  const selectedEdgeOriginalData =
+  const selectedEdgeData =
     selectedElement?.kind === "edge" ? selectedElement.data : null;
-
-  const selectedEdgeData = selectedEdgeOriginalData
-    ? buildEdgeDetailData(selectedEdgeOriginalData)
-    : null;
-
-  const selectedEdgeSemanticModel = selectedEdgeOriginalData
-    ? getEdgeSemanticModel(selectedEdgeOriginalData, semanticProfile)
-    : null;
-
   const selectedNodeHref = selectedNodeData
-  ? getNodeHref(selectedNodeData, nodeNavigationMode)
-  : null;
-  const selectedEdgeSummary =
-  selectedElement?.kind === "edge" && selectedEdgeData
-    ? {
-        source: getEndpointDisplay(selectedElement.data, "source"),
-        target: getEndpointDisplay(selectedElement.data, "target"),
-        type: formatSummaryValue(selectedEdgeData.type),
-        sources: formatSummaryValue(selectedEdgeData.sources),
-        methods: formatSummaryValue(selectedEdgeData.methods),
-        publications: formatSummaryValue(selectedEdgeData.publications),
-        structures: formatSummaryValue(selectedEdgeData.supporting_structures),
-        goldRecordCount: formatSummaryValue(selectedEdgeData.gold_record_count),
-        ddi: formatSummaryValue(selectedEdgeData.ddi),
-        dmi: formatSummaryValue(selectedEdgeData.dmi),
-      }
+    ? getNodeHref(selectedNodeData, nodeNavigationMode)
     : null;
+  const selectedEdgeView = useMemo(() => {
+    if (!selectedEdgeData || !isRelationKind(selectedEdgeData.relationKind)) {
+      return null;
+    }
+
+    return buildEdgeDetailViewModel(selectedEdgeData);
+  }, [selectedEdgeData]);
+
   function fitView() {
-  cyRef.current?.fit(undefined, 120);
-}
+    cyRef.current?.fit(undefined, 120);
+  }
 
   function resetLayout() {
     const cy = cyRef.current;
 
-    if (!cy) {
-      return;
-    }
-
-    const layout = cy.layout(getLayoutOptions(layoutName));
-    layout.run();
-
-    if (showEdgeLabels) {
-      cy.edges().addClass("show-label");
+    if (cy) {
+      cy.layout(getLayoutOptions(layoutName)).run();
+      if (showEdgeLabels) {
+        cy.edges().addClass("show-label");
+      }
     }
   }
 
@@ -1077,14 +573,8 @@ export default function NetworkGraph({
       return;
     }
 
-    const pngData = cy.png({
-      full: true,
-      scale: 2,
-      bg: "#020617",
-    });
-
     const link = document.createElement("a");
-    link.href = pngData;
+    link.href = cy.png({ full: true, scale: 2, bg: "#020617" });
     link.download = `${makeSafeFileName(graphName)}.png`;
     link.click();
   }
@@ -1096,33 +586,20 @@ export default function NetworkGraph({
       focusNodeId: focusNodeId ?? null,
       exportKind: "canonical_network",
       canonicalNetwork: {
-        description:
-          "The complete current backend response page after backend filters and pagination.",
         nodeCount: graphElements.nodes.length,
         edgeCount: graphElements.edges.length,
         nodes: graphElements.nodes,
         edges: graphElements.edges,
       },
     };
-
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" })
+    );
     const link = document.createElement("a");
-
     link.href = url;
     link.download = `${makeSafeFileName(graphName)}_network.json`;
     link.click();
-
     URL.revokeObjectURL(url);
-  }
-
-  function openSelectedNode() {
-    if (selectedNodeHref) {
-      router.push(selectedNodeHref);
-    }
   }
 
   useEffect(() => {
@@ -1131,68 +608,41 @@ export default function NetworkGraph({
     }
 
     setSelectedElement(null);
-
-        const focusedElements = addFocusToElements(graphElements, focusNodeId);
-
     const cy = cytoscape({
       container: containerRef.current,
-      elements: focusedElements as cytoscape.ElementsDefinition,
+      elements: addFocusToElements(graphElements, focusNodeId) as cytoscape.ElementsDefinition,
       style: networkStyle,
       layout: getLayoutOptions(layoutName),
       boxSelectionEnabled: false,
       autounselectify: false,
     });
-
-        cyRef.current = cy;
-
+    cyRef.current = cy;
+    applyRelationPresentationClasses(cy);
 
     if (showEdgeLabels) {
       cy.edges().addClass("show-label");
     }
 
-    function setPointerCursor() {
+    const setPointerCursor = () => {
       if (containerRef.current) {
         containerRef.current.style.cursor = "pointer";
       }
-    }
-
-    function setDefaultCursor() {
+    };
+    const setDefaultCursor = () => {
       if (containerRef.current) {
         containerRef.current.style.cursor = "default";
       }
-    }
+    };
 
-    cy.on("mouseover", "node", setPointerCursor);
-    cy.on("mouseout", "node", setDefaultCursor);
-
-    cy.on("mouseover", "edge", setPointerCursor);
-    cy.on("mouseout", "edge", setDefaultCursor);
-
+    cy.on("mouseover", "node, edge", setPointerCursor);
+    cy.on("mouseout", "node, edge", setDefaultCursor);
     cy.on("tap", "node", (event) => {
-      const node = event.target as NodeSingular;
-      setSelectedElement({
-        kind: "node",
-        data: { ...node.data() },
-      });
+      setSelectedElement({ kind: "node", data: { ...event.target.data() } });
     });
-
     cy.on("tap", "edge", (event) => {
-  const edge = event.target as EdgeSingular;
-  const sourceNode = edge.source();
-  const targetNode = edge.target();
-
-  setSelectedElement({
-    kind: "edge",
-    data: {
-      ...edge.data(),
-      source_node_id: sourceNode.data("id"),
-      source_node_label: sourceNode.data("label"),
-      target_node_id: targetNode.data("id"),
-      target_node_label: targetNode.data("label"),
-    },
-  });
-});
-
+      const edge = event.target as EdgeSingular;
+      setSelectedElement({ kind: "edge", data: { ...edge.data() } });
+    });
     cy.on("tap", (event) => {
       if (event.target === cy) {
         cy.elements().unselect();
@@ -1204,416 +654,158 @@ export default function NetworkGraph({
       cy.destroy();
       cyRef.current = null;
     };
-    }, [graphElements, focusNodeId, layoutName, showEdgeLabels]);
-
-  useEffect(() => {
-    const cy = cyRef.current;
-
-    if (!cy) {
-      return;
-    }
-
-    applyEdgeEvidenceClasses(cy, graphType);
-  }, [graphElements, graphType]);
+  }, [graphElements, focusNodeId, layoutName, showEdgeLabels]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
       <section className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">
-              Network Viewer
-            </h2>
+            <h2 className="text-lg font-semibold text-slate-100">Network Viewer</h2>
             <p className="text-sm text-slate-400">
               Drag nodes, scroll to zoom, click a node or edge to inspect it.
             </p>
           </div>
-
           <div className="flex flex-wrap gap-2">
-  <button
-    type="button"
-    onClick={fitView}
-    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
-  >
-    Fit View
-  </button>
-
-  <button
-    type="button"
-    onClick={resetLayout}
-    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
-  >
-    Reset Layout
-  </button>
-
-  <button
-    type="button"
-    onClick={downloadPng}
-    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
-  >
-    Download PNG
-  </button>
-
-  <button
-    type="button"
-    onClick={downloadNetworkJson}
-    className="rounded-lg border border-cyan-800 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-950/50"
-  >
-    Download Network JSON
-  </button>
-</div>
+            <button type="button" onClick={fitView} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800">Fit View</button>
+            <button type="button" onClick={resetLayout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800">Reset Layout</button>
+            <button type="button" onClick={downloadPng} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800">Download PNG</button>
+            <button type="button" onClick={downloadNetworkJson} className="rounded-lg border border-cyan-800 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-950/50">Download Network JSON</button>
+          </div>
         </div>
 
-                <div
-                
-  ref={containerRef}
-  className="h-[760px] w-full rounded-xl border border-slate-800 bg-slate-900"
-/>
+        <div ref={containerRef} className="h-[760px] w-full rounded-xl border border-slate-800 bg-slate-900" />
 
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
-          <span className="font-semibold uppercase tracking-wide text-slate-500">
-            Node legend
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full border border-green-200 bg-green-500" />
-            TF
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full border border-sky-200 bg-sky-400" />
-            EF
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full border border-orange-200 bg-orange-500" />
-            TF_and_EF
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full border border-yellow-200 bg-yellow-400" />
-            Focus protein
-          </span>
-
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full border border-purple-200 bg-purple-500" />
-            Complex
-          </span>
+          <span className="font-semibold uppercase tracking-wide text-slate-500">Node legend</span>
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-green-200 bg-green-500" />TF</span>
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-sky-200 bg-sky-400" />EF</span>
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-orange-200 bg-orange-500" />TF_and_EF</span>
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-yellow-200 bg-yellow-400" />Focus protein</span>
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-purple-200 bg-purple-500" />Complex</span>
         </div>
-                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
-          <span className="font-semibold uppercase tracking-wide text-slate-500">
-            {semanticProfile.graphKind === "complex_ext"
-              ? "Complex external edge legend"
-              : "Edge legend"}
-          </span>
 
-          {edgeLegendItems.map((item) => (
-            <span key={item.key} className="inline-flex items-center gap-2">
-              <span className={item.swatchClassName} />
-              {item.label}
-            </span>
-          ))}
-        </div>
-                <NetworkAttributeTable
-          nodes={graphElements.nodes}
-          edges={graphElements.edges}
-        />
+        {edgeLegendItems.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
+            <span className="font-semibold uppercase tracking-wide text-slate-500">Edge legend</span>
+            {edgeLegendItems.map((item) => (
+              <span key={item.key} className="inline-flex items-center gap-2">
+                <span className={item.swatchClassName} />
+                {item.label}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <NetworkAttributeTable nodes={graphElements.nodes} edges={graphElements.edges} />
       </section>
 
       <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
         <h2 className="text-lg font-semibold text-slate-100">
           {selectedElement?.kind === "edge" ? "Edge Detail" : "Node Detail"}
         </h2>
-
         <p className="mt-1 text-sm text-slate-400">
-          Click a node to view node metadata. Click an edge to view relationship
-          evidence.
+          Click a node to view node metadata. Click an edge to view relationship evidence.
         </p>
 
-        {!selectedElement && (
-          <div className="mt-4 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
-            No node or edge selected.
-          </div>
-        )}
+        {!selectedElement && <div className="mt-4 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">No node or edge selected.</div>}
 
-        {selectedElement?.kind === "node" && selectedNodeData && (
+        {selectedNodeData && (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-cyan-900/70 bg-cyan-950/20 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-                Selected Node
-              </p>
-
-              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">
-                {String(
-                  selectedNodeData.label ||
-                    selectedNodeData.name ||
-                    selectedNodeData.id ||
-                    "Unknown"
-                )}
-              </h3>
-
-              <p className="mt-1 break-words text-xs text-slate-400">
-                {String(selectedNodeData.id || "N/A")}
-              </p>
-
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Selected Node</p>
+              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">{String(selectedNodeData.label ?? selectedNodeData.id ?? "Unknown")}</h3>
+              <p className="mt-1 break-words text-xs text-slate-400">{String(selectedNodeData.id ?? "N/A")}</p>
               {selectedNodeHref && enableNodeNavigation && (
-               <button
-  type="button"
-  onClick={openSelectedNode}
-  className="mt-3 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
->
-  {nodeNavigationMode === "global-ppi"
-    ? "Open Global Neighborhood"
-    : "Open Detail Page"}
-</button>
+                <button type="button" onClick={() => router.push(selectedNodeHref)} className="mt-3 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">
+                  {nodeNavigationMode === "global-ppi" ? "Open Global Neighborhood" : "Open Detail Page"}
+                </button>
               )}
             </div>
-
-            {typeof selectedNodeData.hpaProfile === "object" &&
-            selectedNodeData.hpaProfile !== null ? (
-              <ExpressionProfileCard
-                data={selectedNodeData.hpaProfile as Record<string, unknown>}
-                compact
-              />
-            ) : null}
-
+            {typeof selectedNodeData.hpaProfile === "object" && selectedNodeData.hpaProfile !== null && (
+              <ExpressionProfileCard data={selectedNodeData.hpaProfile as DetailRecord} compact />
+            )}
             <DetailFields title="Node Fields" data={selectedNodeData} />
           </div>
         )}
 
-        {selectedElement?.kind === "edge" && selectedEdgeData && selectedEdgeSummary && (
+        {selectedEdgeData && !selectedEdgeView && (
+          <div className="mt-4 rounded-xl border border-red-900/70 bg-red-950/20 p-4 text-sm text-red-200">
+            This edge is missing a canonical relationKind and cannot be presented safely.
+          </div>
+        )}
+
+        {selectedEdgeData && selectedEdgeView && (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-amber-900/70 bg-amber-950/20 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">
-                Interaction Summary
-              </p>
-
-              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">
-                {getEdgeTitle(selectedElement.data)}
-              </h3>
-
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">Relationship Summary</p>
+              <h3 className="mt-1 break-words text-base font-semibold text-slate-100">{selectedEdgeView.source} → {selectedEdgeView.target}</h3>
+              <p className="mt-1 text-sm text-slate-300">{selectedEdgeView.relationDescription}</p>
               <div className="mt-4 grid gap-3 text-sm">
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">
-                    Source
-                  </p>
-                  <p className="mt-1 break-words font-medium text-slate-200">
-                    {selectedEdgeSummary.source}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">
-                    Target
-                  </p>
-                  <p className="mt-1 break-words font-medium text-slate-200">
-                    {selectedEdgeSummary.target}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">
-                    Relationship Type
-                  </p>
-                  <p className="mt-1 break-words font-medium text-slate-200">
-                    {selectedEdgeSummary.type}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">
-                    Evidence Level
-                  </p>
-                  <p className="mt-1 break-words font-medium text-slate-200">
-                    {evidenceLevelLabel(selectedEdgeData.evidenceLevel)}
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  {selectedEdgeSemanticModel?.statusBadges.map((badge) =>
-                    renderStatusBadge(
-                      badge.active,
-                      badge.activeLabel,
-                      badge.inactiveLabel,
-                      badge.key
-                    )
-                  )}
-                </div>
+                <DetailCard label="Relationship" value={selectedEdgeView.relationLabel} />
+                <DetailCard label="Source" value={selectedEdgeView.source} />
+                <DetailCard label="Target" value={selectedEdgeView.target} />
               </div>
             </div>
 
-            {selectedEdgeSemanticModel?.complexExternalExplanation && (
-              <div className="rounded-xl border border-purple-900/70 bg-purple-950/10 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-purple-300">
-                  Complex External Explanation
-                </p>
-
+            {selectedEdgeView.showCoMembershipExplanation && (
+              <div className="rounded-xl border border-orange-900/70 bg-orange-950/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-orange-300">Co-complex Membership</p>
+                <p className="mt-2 text-sm text-slate-300">This pair shares complex membership but has no direct PPI evidence in the current source data.</p>
                 <div className="mt-3 grid gap-3 text-sm">
-                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      External Partner Gene
-                    </p>
-                    <p className="mt-1 break-words font-medium text-slate-200">
-                      {formatSummaryValue(
-                        selectedEdgeSemanticModel.complexExternalExplanation
-                          .externalPartnerGene
-                      )}
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      Mediating Subunit Count
-                    </p>
-                    <p className="mt-1 break-words font-medium text-slate-200">
-                      {formatSummaryValue(
-                        selectedEdgeSemanticModel.complexExternalExplanation
-                          .nMediatingSubunits
-                      )}
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      Mediating Subunit IDs
-                    </p>
-                    <div className="mt-2">
-                      {renderValueList(
-                        selectedEdgeSemanticModel.complexExternalExplanation
-                          .mediatingSubunitIds,
-                        "No mediating subunit IDs"
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      Mediating Subunit Genes
-                    </p>
-                    <div className="mt-2">
-                      {renderValueList(
-                        selectedEdgeSemanticModel.complexExternalExplanation
-                          .mediatingSubunitGenes,
-                        "No mediating subunit genes"
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                    <div className="mb-2">
-                      {renderStatusBadge(
-                        selectedEdgeSemanticModel.complexExternalExplanation
-                          .isSubunitOfOtherComplex,
-                        "Partner is in other complexes",
-                        "Partner not marked in other complexes"
-                      )}
-                    </div>
-
-                    {renderValueList(
-                      selectedEdgeSemanticModel.complexExternalExplanation
-                        .otherComplexIds,
-                      "No other complex IDs"
-                    )}
-                  </div>
+                  <DetailCard label="Complex ID" value={selectedEdgeView.coMembership?.complexId} />
+                  <DetailCard label="Complex Name" value={selectedEdgeView.coMembership?.complexName} />
                 </div>
               </div>
             )}
 
-            <div className="rounded-xl border border-pink-900/70 bg-pink-950/10 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-pink-300">
-                DDI / DMI Evidence
-              </p>
-
-              <div className="mt-3 grid gap-3 text-sm">
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <div className="mb-2">
-                    {renderStatusBadge(
-                      Boolean(selectedEdgeData.hasDDI),
-                      "DDI-supported",
-                      "No DDI evidence"
-                    )}
-                  </div>
-                  {renderValueList(selectedEdgeData.ddi, "No DDI records")}
-                </div>
-
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <div className="mb-2">
-                    {renderStatusBadge(
-                      Boolean(selectedEdgeData.hasDMI),
-                      "DMI-supported",
-                      "No DMI evidence"
-                    )}
-                  </div>
-                  {renderValueList(selectedEdgeData.dmi, "No DMI records")}
+            {selectedEdgeView.showExternalMediation && selectedEdgeView.externalMediation && (
+              <div className="rounded-xl border border-purple-900/70 bg-purple-950/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-purple-300">Complex External Mediation</p>
+                <div className="mt-3 grid gap-3 text-sm">
+                  <DetailCard label="External Partner Gene" value={selectedEdgeView.externalMediation.externalPartnerGene} />
+                  <DetailCard label="Mediating Subunit Count" value={selectedEdgeView.externalMediation.nMediatingSubunits} />
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Mediating Subunit IDs</p><div className="mt-2">{renderValueList(selectedEdgeView.externalMediation.mediatingSubunitIds, "No mediating subunit IDs")}</div></div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Other Complex IDs</p><div className="mt-2">{renderValueList(selectedEdgeView.externalMediation.otherComplexIds, "No other complex IDs")}</div></div>
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="rounded-xl border border-sky-900/70 bg-sky-950/10 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-sky-300">
-                Structural Evidence
-              </p>
-
-              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-sm">
-                <div className="mb-2">
-                  {renderStatusBadge(
-                    Boolean(selectedEdgeData.hasStructuralEvidence),
-                    "Structural evidence available",
-                    "No structural evidence"
-                  )}
+            {selectedEdgeView.showInteractionEvidence && (
+              <div className="rounded-xl border border-cyan-900/70 bg-cyan-950/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Interaction Evidence</p>
+                <div className="mt-3 grid gap-3 text-sm">
+                  <DetailCard label="Source count" value={selectedEdgeView.evidence.sourceCount} />
+                  <DetailCard label="Method count" value={selectedEdgeView.evidence.methodCount} />
+                  <DetailCard label="Publication count" value={selectedEdgeView.evidence.publicationCount} />
+                  <DetailCard label="Structure count" value={selectedEdgeView.evidence.structureCount} />
+                  <DetailCard label="Gold record count" value={selectedEdgeView.evidence.goldRecordCount} />
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Source Databases</p><div className="mt-2">{renderValueList(selectedEdgeData.evidenceSources, "No source databases")}</div></div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Experimental Methods</p><div className="mt-2">{renderValueList(selectedEdgeData.methods, "No methods")}</div></div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Publications</p><div className="mt-2">{renderValueList(selectedEdgeData.publications, "No publications")}</div></div>
                 </div>
-                {renderValueList(
-                  selectedEdgeData.supportingStructures ||
-                    selectedEdgeData.supporting_structures,
-                  "No supporting PDB structures"
-                )}
               </div>
-            </div>
+            )}
 
-            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-                Source Databases
-              </p>
-
-              <div className="mt-3 text-sm">
-                {renderValueList(
-                  selectedEdgeData.evidenceSources || selectedEdgeData.sources,
-                  "No source databases"
-                )}
+            {selectedEdgeView.showFeatureAnnotations && (
+              <div className="rounded-xl border border-pink-900/70 bg-pink-950/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-pink-300">Feature and Structural Annotations</p>
+                <div className="mt-3 grid gap-3 text-sm">
+                  <DetailCard label="DDI record count" value={selectedEdgeView.evidence.ddiRecordCount} />
+                  <DetailCard label="DMI record count" value={selectedEdgeView.evidence.dmiRecordCount} />
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">DDI Details</p><div className="mt-2">{renderValueList(selectedEdgeData.ddi, "No DDI records")}</div></div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">DMI Details</p><div className="mt-2">{renderValueList(selectedEdgeData.dmi, "No DMI records")}</div></div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Supporting PDB Structures</p><div className="mt-2">{renderValueList(selectedEdgeData.supportingStructures, "No supporting PDB structures")}</div></div>
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-                Experimental Methods
-              </p>
-
-              <div className="mt-3 text-sm">
-                {renderValueList(selectedEdgeData.methods, "No methods")}
+            {selectedEdgeView.showInteractionEvidence && (
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">External Links</p>
+                <div className="mt-3 text-sm">{renderExternalLinks(selectedEdgeData.externalLinks)}</div>
               </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-                Publications
-              </p>
-
-              <div className="mt-3 text-sm">
-                {renderValueList(selectedEdgeData.publications, "No publications")}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-                External Links
-              </p>
-
-              <div className="mt-3 text-sm">
-                {renderExternalLinks(selectedEdgeData.externalLinks)}
-              </div>
-            </div>
-
-            <DetailFields title="Full Edge Fields" data={selectedEdgeData} />
+            )}
           </div>
         )}
       </aside>

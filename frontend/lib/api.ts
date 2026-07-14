@@ -1,4 +1,8 @@
-import type { ComplexExternalEdgeFields } from "./networkTypes";
+import type {
+  ComplexExternalEdgeFields,
+  EvidenceSummary,
+  RelationKind,
+} from "./networkTypes";
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -58,6 +62,7 @@ export type NetworkEdge = ComplexExternalEdgeFields & {
   source?: string;
   target?: string;
   type?: string;
+  relationKind?: RelationKind;
   label?: string;
   evidenceSources?: string[];
   methods?: string[];
@@ -70,8 +75,7 @@ export type NetworkEdge = ComplexExternalEdgeFields & {
   hasStructuralEvidence?: boolean;
   isConfirmedPpi?: boolean;
   isCoComplexOnly?: boolean;
-  evidenceLevel?: string;
-  evidenceSummary?: Record<string, unknown>;
+  evidenceSummary?: EvidenceSummary;
   externalLinks?: Record<string, unknown>[];
   raw?: Record<string, unknown>;
   [key: string]: unknown;

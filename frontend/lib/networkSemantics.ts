@@ -2,6 +2,8 @@ import {
   getComplexExternalExplanationFields,
   getComplexExternalOtherComplexFlag,
 } from "@/lib/complexExternalSemantics";
+import type { RelationKind } from "@/lib/networkTypes";
+
 export type DetailRecord = Record<string, unknown>;
 
 export type GraphSemanticKind =
@@ -19,18 +21,10 @@ export type EdgeSemanticKind =
   | "unknown";
 
 export type EdgeVisualRole =
-  | "protein_ppi_default"
-  | "protein_ppi_ddi"
-  | "protein_ppi_dmi"
-  | "protein_ppi_ddi_dmi"
-  | "protein_ppi_structural"
+  | "protein_ppi"
   | "complex_intra_confirmed"
   | "complex_intra_co_complex_only"
-  | "complex_intra_structural"
-  | "complex_ext_base"
-  | "complex_ext_other_complex"
-  | "complex_ext_structural"
-  | "complex_ext_structural_other_complex"
+  | "complex_external_partner"
   | "unknown";
 
 export type NetworkSemanticProfile = {
@@ -54,14 +48,9 @@ export type StatusBadge = {
   inactiveLabel: string;
 };
 
-export type ComplexExternalExplanation = {
-  externalPartnerGene: unknown;
-  mediatingSubunitIds: unknown;
-  mediatingSubunitGenes: unknown;
-  nMediatingSubunits: unknown;
-  isSubunitOfOtherComplex: boolean;
-  otherComplexIds: unknown;
-};
+export type ComplexExternalExplanation = ReturnType<
+  typeof getComplexExternalExplanationFields
+>;
 
 export type EdgeSemanticModel = {
   kind: EdgeSemanticKind;
@@ -78,16 +67,6 @@ function normalizeToken(value: unknown): string {
     .replace(/-/g, "_");
 }
 
-function rawOf(record: DetailRecord): DetailRecord {
-  const raw = record.raw;
-
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return raw as DetailRecord;
-  }
-
-  return {};
-}
-
 function toBoolean(value: unknown): boolean {
   if (typeof value === "boolean") {
     return value;
@@ -101,56 +80,19 @@ function toBoolean(value: unknown): boolean {
     return ["true", "1", "yes", "y"].includes(value.trim().toLowerCase());
   }
 
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-
   return false;
 }
 
-function hasSemanticValue(value: unknown): boolean {
-  if (value === undefined || value === null) {
-    return false;
-  }
-
-  if (typeof value === "string") {
-    return value.trim() !== "";
-  }
-
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-
-  if (typeof value === "object") {
-    return Object.keys(value as DetailRecord).length > 0;
-  }
-
-  return true;
-}
-
-export function firstSemanticValue(
-  record: DetailRecord,
-  keys: string[]
-): unknown {
-  const raw = rawOf(record);
-
-  for (const key of keys) {
-    const value = record[key];
-
-    if (hasSemanticValue(value)) {
+function asRelationKind(value: unknown): RelationKind | null {
+  switch (value) {
+    case "protein_physical_interaction":
+    case "complex_subunit_pair_supported":
+    case "complex_subunit_pair_co_membership_only":
+    case "complex_external_partner":
       return value;
-    }
+    default:
+      return null;
   }
-
-  for (const key of keys) {
-    const value = raw[key];
-
-    if (hasSemanticValue(value)) {
-      return value;
-    }
-  }
-
-  return undefined;
 }
 
 export function getNetworkSemanticProfile(
@@ -159,201 +101,76 @@ export function getNetworkSemanticProfile(
   const normalized = normalizeToken(graphType);
 
   if (normalized === "complex_ext" || normalized === "complex_external") {
-    return {
-      graphType: typeof graphType === "string" ? graphType : undefined,
-      graphKind: "complex_ext",
-    };
+    return { graphType: typeof graphType === "string" ? graphType : undefined, graphKind: "complex_ext" };
   }
 
   if (normalized === "complex_intra") {
-    return {
-      graphType: typeof graphType === "string" ? graphType : undefined,
-      graphKind: "complex_intra",
-    };
+    return { graphType: typeof graphType === "string" ? graphType : undefined, graphKind: "complex_intra" };
   }
 
   if (normalized === "protein_neighborhood") {
-    return {
-      graphType: typeof graphType === "string" ? graphType : undefined,
-      graphKind: "protein_neighborhood",
-    };
+    return { graphType: typeof graphType === "string" ? graphType : undefined, graphKind: "protein_neighborhood" };
   }
 
   if (normalized === "global_ppi_neighborhood") {
-    return {
-      graphType: typeof graphType === "string" ? graphType : undefined,
-      graphKind: "global_ppi_neighborhood",
-    };
+    return { graphType: typeof graphType === "string" ? graphType : undefined, graphKind: "global_ppi_neighborhood" };
   }
 
-  return {
-    graphType: typeof graphType === "string" ? graphType : undefined,
-    graphKind: "unknown",
-  };
-}
-
-function getEdgeType(edge: DetailRecord): string {
-  const raw = rawOf(edge);
-  return normalizeToken(edge.type ?? raw.relationshipKind);
-}
-
-function getEvidenceLevel(edge: DetailRecord): string {
-  return normalizeToken(edge.evidenceLevel);
+  return { graphType: typeof graphType === "string" ? graphType : undefined, graphKind: "unknown" };
 }
 
 export function getEdgeEvidenceFlags(edge: DetailRecord): EdgeEvidenceFlags {
   return {
-    hasDDI: toBoolean(
-      firstSemanticValue(edge, [
-        "hasDDI",
-        "hasDdi",
-        "ddi",
-        "DDI",
-        "domain_domain_interactions",
-        "domainDomainInteractions",
-      ])
-    ),
-    hasDMI: toBoolean(
-      firstSemanticValue(edge, [
-        "hasDMI",
-        "hasDmi",
-        "dmi",
-        "DMI",
-        "domain_motif_interactions",
-        "domainMotifInteractions",
-      ])
-    ),
-    hasStructuralEvidence: toBoolean(
-      firstSemanticValue(edge, [
-        "hasStructuralEvidence",
-        "supportingStructures",
-        "supporting_structures",
-        "pdb",
-        "pdbIds",
-        "pdb_ids",
-      ])
-    ),
-    isConfirmedPpi: toBoolean(
-      firstSemanticValue(edge, ["isConfirmedPpi", "is_confirmed_ppi"])
-    ),
-    isCoComplexOnly: toBoolean(
-      firstSemanticValue(edge, ["isCoComplexOnly", "is_co_complex_only"])
-    ),
+    hasDDI: toBoolean(edge.hasDDI),
+    hasDMI: toBoolean(edge.hasDMI),
+    hasStructuralEvidence: toBoolean(edge.hasStructuralEvidence),
+    isConfirmedPpi: toBoolean(edge.isConfirmedPpi),
+    isCoComplexOnly: toBoolean(edge.isCoComplexOnly),
     isSubunitOfOtherComplex: getComplexExternalOtherComplexFlag(edge),
   };
 }
 
 export function getEdgeSemanticKind(
   edge: DetailRecord,
-  profile: NetworkSemanticProfile
+  _profile?: NetworkSemanticProfile
 ): EdgeSemanticKind {
-  const edgeType = getEdgeType(edge);
-  const evidenceLevel = getEvidenceLevel(edge);
-  const flags = getEdgeEvidenceFlags(edge);
+  void _profile;
 
-  if (
-    profile.graphKind === "complex_ext" ||
-    edgeType === "complex_external_ppi" ||
-    edgeType === "complex_external_partner" ||
-    edgeType === "ext_ppi_partner"
-  ) {
-    return "complex_external_partner";
-  }
-
-  if (profile.graphKind === "complex_intra" || edgeType === "complex_intra_ppi") {
-    if (flags.isCoComplexOnly || evidenceLevel === "co_complex_only") {
-      return "complex_intra_co_complex_only";
-    }
-
-    if (flags.isConfirmedPpi) {
+  switch (asRelationKind(edge.relationKind)) {
+    case "protein_physical_interaction":
+      return "protein_ppi";
+    case "complex_subunit_pair_supported":
       return "complex_intra_confirmed_ppi";
-    }
-
-    return "unknown";
+    case "complex_subunit_pair_co_membership_only":
+      return "complex_intra_co_complex_only";
+    case "complex_external_partner":
+      return "complex_external_partner";
+    default:
+      return "unknown";
   }
-
-  if (
-    profile.graphKind === "protein_neighborhood" ||
-    profile.graphKind === "global_ppi_neighborhood" ||
-    edgeType === "ppi" ||
-    edgeType === "direct_ppi" ||
-    edgeType === "protein_ppi"
-  ) {
-    return "protein_ppi";
-  }
-
-  if (flags.isCoComplexOnly || evidenceLevel === "co_complex_only") {
-    return "complex_intra_co_complex_only";
-  }
-
-  if (flags.isConfirmedPpi) {
-    return "protein_ppi";
-  }
-
-  return "unknown";
 }
 
 export function getEdgeVisualRole(
   edge: DetailRecord,
-  profile: NetworkSemanticProfile
+  profile?: NetworkSemanticProfile
 ): EdgeVisualRole {
-  const kind = getEdgeSemanticKind(edge, profile);
-  const flags = getEdgeEvidenceFlags(edge);
-
-  if (kind === "complex_external_partner") {
-    if (flags.hasStructuralEvidence && flags.isSubunitOfOtherComplex) {
-      return "complex_ext_structural_other_complex";
-    }
-
-    if (flags.hasStructuralEvidence) {
-      return "complex_ext_structural";
-    }
-
-    if (flags.isSubunitOfOtherComplex) {
-      return "complex_ext_other_complex";
-    }
-
-    return "complex_ext_base";
+  switch (getEdgeSemanticKind(edge, profile)) {
+    case "protein_ppi":
+      return "protein_ppi";
+    case "complex_intra_confirmed_ppi":
+      return "complex_intra_confirmed";
+    case "complex_intra_co_complex_only":
+      return "complex_intra_co_complex_only";
+    case "complex_external_partner":
+      return "complex_external_partner";
+    default:
+      return "unknown";
   }
-
-  if (kind === "complex_intra_co_complex_only") {
-    return "complex_intra_co_complex_only";
-  }
-
-  if (kind === "complex_intra_confirmed_ppi") {
-    if (flags.hasStructuralEvidence) {
-      return "complex_intra_structural";
-    }
-
-    return "complex_intra_confirmed";
-  }
-
-  if (kind === "protein_ppi") {
-    if (flags.hasStructuralEvidence) {
-      return "protein_ppi_structural";
-    }
-
-    if (flags.hasDDI && flags.hasDMI) {
-      return "protein_ppi_ddi_dmi";
-    }
-
-    if (flags.hasDDI) {
-      return "protein_ppi_ddi";
-    }
-
-    if (flags.hasDMI) {
-      return "protein_ppi_dmi";
-    }
-
-    return "protein_ppi_default";
-  }
-
-  return "unknown";
 }
 
 export function getEdgeStatusBadges(
   edge: DetailRecord,
-  profile: NetworkSemanticProfile
+  profile?: NetworkSemanticProfile
 ): StatusBadge[] {
   const kind = getEdgeSemanticKind(edge, profile);
   const flags = getEdgeEvidenceFlags(edge);
@@ -378,13 +195,13 @@ export function getEdgeStatusBadges(
   return [
     {
       key: "confirmed-direct-ppi",
-      active: flags.isConfirmedPpi,
+      active: kind === "protein_ppi" || kind === "complex_intra_confirmed_ppi",
       activeLabel: "Confirmed direct PPI",
       inactiveLabel: "Not confirmed direct PPI",
     },
     {
       key: "co-complex-only",
-      active: flags.isCoComplexOnly,
+      active: kind === "complex_intra_co_complex_only",
       activeLabel: "Co-complex only",
       inactiveLabel: "Not co-complex only",
     },
@@ -393,21 +210,20 @@ export function getEdgeStatusBadges(
 
 export function getComplexExternalExplanation(
   edge: DetailRecord,
-  profile: NetworkSemanticProfile
+  profile?: NetworkSemanticProfile
 ): ComplexExternalExplanation | null {
   if (getEdgeSemanticKind(edge, profile) !== "complex_external_partner") {
     return null;
   }
 
-  const flags = getEdgeEvidenceFlags(edge);
-
   return getComplexExternalExplanationFields(edge, {
-    isSubunitOfOtherComplex: flags.isSubunitOfOtherComplex,
+    isSubunitOfOtherComplex: getEdgeEvidenceFlags(edge).isSubunitOfOtherComplex,
   });
 }
+
 export function getEdgeSemanticModel(
   edge: DetailRecord,
-  profile: NetworkSemanticProfile
+  profile?: NetworkSemanticProfile
 ): EdgeSemanticModel {
   return {
     kind: getEdgeSemanticKind(edge, profile),

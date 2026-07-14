@@ -30,7 +30,6 @@ from numbers import Integral, Real
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from app.schemas.visualization import (
-    EvidenceLevel,
     EvidenceSummary,
     ExternalLink,
     validate_feature_support,
@@ -329,40 +328,6 @@ def _is_positive(count: Optional[int]) -> bool:
     return count is not None and count > 0
 
 
-def compute_evidence_level(
-    summary: EvidenceSummary,
-    *,
-    has_ddi: bool,
-    has_dmi: bool,
-) -> EvidenceLevel:
-    """Compute the first-pass evidence level in the backend."""
-
-    if summary.isCoComplexOnly:
-        return "co_complex_only"
-
-    if summary.hasStructuralEvidence:
-        return "high"
-
-    if (has_ddi or has_dmi) and _is_positive(summary.publicationCount):
-        return "high"
-
-    if (
-        (summary.sourceCount is not None and summary.sourceCount >= 2)
-        or (summary.publicationCount is not None and summary.publicationCount >= 2)
-        or (summary.goldRecordCount is not None and summary.goldRecordCount >= 2)
-    ):
-        return "medium"
-
-    if (
-        _is_positive(summary.sourceCount)
-        or _is_positive(summary.methodCount)
-        or _is_positive(summary.publicationCount)
-    ):
-        return "low"
-
-    return "unknown"
-
-
 def normalize_evidence(
     raw: Dict[str, Any],
     *,
@@ -456,11 +421,6 @@ def normalize_evidence(
         "isConfirmedPpi": is_confirmed_ppi,
         "isCoComplexOnly": is_co_complex_only,
         "evidenceSummary": summary,
-        "evidenceLevel": compute_evidence_level(
-            summary,
-            has_ddi=has_ddi,
-            has_dmi=has_dmi,
-        ),
         "externalLinks": build_pubmed_links(publications)
         + build_pdb_links(supporting_structures),
     }

@@ -1,148 +1,108 @@
-import type {
-  EdgeSemanticModel,
-  EdgeVisualRole,
-  NetworkSemanticProfile,
-} from "@/lib/networkSemantics";
+import type { EdgeSemanticModel } from "@/lib/networkSemantics";
+import type { RelationKind } from "@/lib/networkTypes";
 
 export type EdgeLegendItem = {
-  key: string;
+  key: RelationKind;
   label: string;
   swatchClassName: string;
 };
 
-export const MANAGED_EDGE_PRESENTATION_CLASSES = [
-  "has-ddi",
-  "has-dmi",
-  "has-ddi-dmi",
-  "has-structural-evidence",
-  "confirmed-ppi",
-  "co-complex-only",
-  "evidence-high",
-  "evidence-medium",
-  "evidence-low",
-  "evidence-unknown",
-  "evidence-co-complex-only",
-  "edge-role-protein-ppi-default",
-  "edge-role-protein-ppi-ddi",
-  "edge-role-protein-ppi-dmi",
-  "edge-role-protein-ppi-ddi-dmi",
-  "edge-role-protein-ppi-structural",
-  "edge-role-complex-intra-confirmed",
-  "edge-role-complex-intra-co-complex-only",
-  "edge-role-complex-intra-structural",
-  "edge-role-complex-ext-base",
-  "edge-role-complex-ext-other-complex",
-  "edge-role-complex-ext-structural",
-  "edge-role-complex-ext-structural-other-complex",
-];
-
-const VISUAL_ROLE_CLASS: Record<EdgeVisualRole, string[]> = {
-  protein_ppi_default: ["edge-role-protein-ppi-default"],
-  protein_ppi_ddi: ["edge-role-protein-ppi-ddi", "has-ddi"],
-  protein_ppi_dmi: ["edge-role-protein-ppi-dmi", "has-dmi"],
-  protein_ppi_ddi_dmi: ["edge-role-protein-ppi-ddi-dmi", "has-ddi-dmi"],
-  protein_ppi_structural: [
-    "edge-role-protein-ppi-structural",
-    "has-structural-evidence",
-  ],
-  complex_intra_confirmed: [
-    "edge-role-complex-intra-confirmed",
-    "confirmed-ppi",
-  ],
-  complex_intra_co_complex_only: [
-    "edge-role-complex-intra-co-complex-only",
-    "co-complex-only",
-  ],
-  complex_intra_structural: [
-    "edge-role-complex-intra-structural",
-    "has-structural-evidence",
-  ],
-  complex_ext_base: ["edge-role-complex-ext-base"],
-  complex_ext_other_complex: ["edge-role-complex-ext-other-complex"],
-  complex_ext_structural: ["edge-role-complex-ext-structural"],
-  complex_ext_structural_other_complex: [
-    "edge-role-complex-ext-structural-other-complex",
-  ],
-  unknown: [],
+export type RelationPresentation = EdgeLegendItem & {
+  description: string;
+  edgeClassName: string;
+  lineStyle: "solid" | "dashed";
+  selectedLineStyle: "solid" | "dashed";
+  legendSwatchClassName: string;
 };
 
+export const MANAGED_EDGE_PRESENTATION_CLASSES = [
+  "edge-relation-protein-physical-interaction",
+  "edge-relation-complex-subunit-pair-supported",
+  "edge-relation-complex-subunit-pair-co-membership-only",
+  "edge-relation-complex-external-partner",
+];
+
+const RELATION_PRESENTATIONS: Record<RelationKind, RelationPresentation> = {
+  protein_physical_interaction: {
+    key: "protein_physical_interaction",
+    label: "Direct PPI",
+    description: "Direct protein-protein interaction.",
+    edgeClassName: "edge-relation-protein-physical-interaction",
+    lineStyle: "solid",
+    selectedLineStyle: "solid",
+    swatchClassName: "h-1 w-8 rounded-full bg-sky-400",
+    legendSwatchClassName: "h-1 w-8 rounded-full bg-sky-400",
+  },
+  complex_subunit_pair_supported: {
+    key: "complex_subunit_pair_supported",
+    label: "Confirmed intra-complex PPI",
+    description: "A direct PPI is confirmed between two complex subunits.",
+    edgeClassName: "edge-relation-complex-subunit-pair-supported",
+    lineStyle: "solid",
+    selectedLineStyle: "solid",
+    swatchClassName: "h-1 w-8 rounded-full bg-emerald-400",
+    legendSwatchClassName: "h-1 w-8 rounded-full bg-emerald-400",
+  },
+  complex_subunit_pair_co_membership_only: {
+    key: "complex_subunit_pair_co_membership_only",
+    label: "Co-complex only",
+    description: "The pair shares complex membership without direct PPI evidence.",
+    edgeClassName: "edge-relation-complex-subunit-pair-co-membership-only",
+    lineStyle: "dashed",
+    selectedLineStyle: "dashed",
+    swatchClassName: "h-1 w-8 border-t border-dashed border-orange-400",
+    legendSwatchClassName:
+      "h-1 w-8 border-t border-dashed border-orange-400",
+  },
+  complex_external_partner: {
+    key: "complex_external_partner",
+    label: "Complex external partner",
+    description: "External protein partner connected through complex subunits.",
+    edgeClassName: "edge-relation-complex-external-partner",
+    lineStyle: "solid",
+    selectedLineStyle: "solid",
+    swatchClassName: "h-1 w-8 rounded-full bg-violet-400",
+    legendSwatchClassName: "h-1 w-8 rounded-full bg-violet-400",
+  },
+};
+
+export function getRelationPresentation(
+  relationKind: RelationKind
+): RelationPresentation {
+  return RELATION_PRESENTATIONS[relationKind];
+}
+
+function relationKindForModel(model: EdgeSemanticModel): RelationKind | null {
+  switch (model.kind) {
+    case "protein_ppi":
+      return "protein_physical_interaction";
+    case "complex_intra_confirmed_ppi":
+      return "complex_subunit_pair_supported";
+    case "complex_intra_co_complex_only":
+      return "complex_subunit_pair_co_membership_only";
+    case "complex_external_partner":
+      return "complex_external_partner";
+    default:
+      return null;
+  }
+}
+
 export function getEdgePresentationClasses(model: EdgeSemanticModel): string[] {
-  return VISUAL_ROLE_CLASS[model.visualRole] ?? [];
+  const relationKind = relationKindForModel(model);
+
+  return relationKind ? [getRelationPresentation(relationKind).edgeClassName] : [];
 }
 
 export function getEdgeLegendItems(
-  profile: NetworkSemanticProfile
+  relationKinds: RelationKind[]
 ): EdgeLegendItem[] {
-  if (profile.graphKind === "complex_ext") {
-    return [
-      {
-        key: "complex-ext-base",
-        label: "External partner",
-        swatchClassName: "h-1 w-8 rounded-full bg-sky-400",
-      },
-      {
-        key: "complex-ext-other-complex",
-        label: "Partner also in other complexes",
-        swatchClassName: "h-1 w-8 border-t border-dashed border-purple-400",
-      },
-      {
-        key: "complex-ext-structural",
-        label: "Structural / PDB-supported external partner",
-        swatchClassName: "h-1.5 w-8 rounded-full bg-amber-400",
-      },
-      {
-        key: "complex-ext-structural-other-complex",
-        label: "PDB-supported and in other complexes",
-        swatchClassName: "h-1.5 w-8 border-t-2 border-dashed border-orange-400",
-      },
-    ];
-  }
+  return Array.from(new Set(relationKinds)).map((relationKind) => {
+    const presentation = getRelationPresentation(relationKind);
 
-  if (profile.graphKind === "complex_intra") {
-    return [
-      {
-        key: "complex-intra-confirmed",
-        label: "Confirmed intra-complex PPI",
-        swatchClassName: "h-1 w-8 rounded-full bg-sky-400",
-      },
-      {
-        key: "complex-intra-co-complex-only",
-        label: "Co-complex only",
-        swatchClassName: "h-1 w-8 border-t border-dashed border-orange-400",
-      },
-      {
-        key: "complex-intra-structural",
-        label: "Structural / PDB evidence",
-        swatchClassName: "h-1.5 w-8 rounded-full bg-slate-200",
-      },
-    ];
-  }
-
-  return [
-    {
-      key: "protein-ppi-default",
-      label: "Protein PPI",
-      swatchClassName: "h-1 w-8 rounded-full bg-sky-400",
-    },
-    {
-      key: "protein-ppi-ddi",
-      label: "DDI evidence",
-      swatchClassName: "h-1 w-8 rounded-full bg-pink-500",
-    },
-    {
-      key: "protein-ppi-dmi",
-      label: "DMI evidence",
-      swatchClassName: "h-1 w-8 rounded-full bg-violet-500",
-    },
-    {
-      key: "protein-ppi-ddi-dmi",
-      label: "DDI + DMI",
-      swatchClassName: "h-1.5 w-8 rounded-full bg-yellow-400",
-    },
-    {
-      key: "protein-ppi-structural",
-      label: "Structural / PDB evidence",
-      swatchClassName: "h-2 w-8 rounded-full bg-slate-200",
-    },
-  ];
+    return {
+      key: presentation.key,
+      label: presentation.label,
+      swatchClassName: presentation.legendSwatchClassName,
+    };
+  });
 }

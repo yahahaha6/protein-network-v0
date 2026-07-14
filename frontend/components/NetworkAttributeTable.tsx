@@ -38,6 +38,7 @@ function getData(element: ElementDefinition): DetailRecord {
 }
 
 function collectColumns(rows: DetailRecord[]) {
+  const excludedColumns = new Set(["raw"]);
   const preferredColumns = [
     "id",
     "label",
@@ -57,7 +58,7 @@ function collectColumns(rows: DetailRecord[]) {
 
   const allKeys = Array.from(
     new Set(rows.flatMap((row) => Object.keys(row)))
-  );
+  ).filter((key) => !excludedColumns.has(key));
 
   const preferred = preferredColumns.filter((key) => allKeys.includes(key));
   const rest = allKeys.filter((key) => !preferredColumns.includes(key)).sort();
@@ -239,7 +240,9 @@ export default function NetworkAttributeTable({
           </p>
 
           <div className="grid gap-2 text-xs md:grid-cols-2">
-            {Object.entries(selectedRow).map(([key, value]) => (
+            {Object.entries(selectedRow)
+              .filter(([key]) => key !== "raw")
+              .map(([key, value]) => (
               <div
                 key={key}
                 className="rounded-lg border border-slate-800 bg-slate-950/70 p-2"
@@ -251,7 +254,7 @@ export default function NetworkAttributeTable({
                   {formatValue(value)}
                 </p>
               </div>
-            ))}
+              ))}
           </div>
         </div>
       )}

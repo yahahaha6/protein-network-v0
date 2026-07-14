@@ -44,6 +44,7 @@ def _make_global_ppi_edge(edge: dict[str, Any]) -> VizEdge:
         source=source_id,
         target=target_id,
         type="ppi",
+        relationKind="protein_physical_interaction",
         label="PPI",
         raw=edge,
         **evidence,
@@ -69,14 +70,6 @@ def _make_network_stats(nodes: list[VizNode], edges: list[VizEdge]) -> NetworkSt
         ),
         confirmedPpiEdgeCount=sum(1 for edge in edges if edge.isConfirmedPpi),
         coComplexOnlyEdgeCount=sum(1 for edge in edges if edge.isCoComplexOnly),
-        highEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "high"),
-        mediumEvidenceEdgeCount=sum(
-            1 for edge in edges if edge.evidenceLevel == "medium"
-        ),
-        lowEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "low"),
-        unknownEvidenceEdgeCount=sum(
-            1 for edge in edges if edge.evidenceLevel == "unknown"
-        ),
     )
 
 
@@ -87,7 +80,6 @@ def _global_ppi_legend() -> NetworkLegend:
                 key="center",
                 label="Center protein",
                 description="The queried protein at the center of the neighborhood.",
-                color="yellow",
             ),
             LegendItem(
                 key="TF",
@@ -112,28 +104,9 @@ def _global_ppi_legend() -> NetworkLegend:
         ],
         edgeEvidence=[
             LegendItem(
-                key="high",
-                label="High evidence",
-                description="Structural evidence, or DDI/DMI with publication support.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="medium",
-                label="Medium evidence",
-                description="Multiple sources, multiple publications, or multiple gold records.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="low",
-                label="Low evidence",
-                description="At least one source, method, or publication exists.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="unknown",
-                label="Unknown evidence",
-                description="No usable evidence fields are available.",
-                lineStyle="dotted",
+                key="protein_physical_interaction",
+                label="Direct PPI",
+                description="Direct protein-protein interaction.",
             ),
         ],
         badges=[

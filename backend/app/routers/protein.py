@@ -77,7 +77,6 @@ def _protein_neighborhood_legend() -> NetworkLegend:
                 key="center",
                 label="Center protein",
                 description="The queried protein at the center of the neighborhood.",
-                color="yellow",
             ),
             LegendItem(
                 key="TF",
@@ -102,28 +101,9 @@ def _protein_neighborhood_legend() -> NetworkLegend:
         ],
         edgeEvidence=[
             LegendItem(
-                key="high",
-                label="High evidence",
-                description="Structural evidence, or DDI/DMI with publication support.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="medium",
-                label="Medium evidence",
-                description="Multiple sources, multiple publications, or multiple gold records.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="low",
-                label="Low evidence",
-                description="At least one source, method, or publication exists.",
-                lineStyle="solid",
-            ),
-            LegendItem(
-                key="unknown",
-                label="Unknown evidence",
-                description="No usable evidence fields are available.",
-                lineStyle="dotted",
+                key="protein_physical_interaction",
+                label="Direct PPI",
+                description="Direct protein-protein interaction.",
             ),
         ],
         badges=[
@@ -165,14 +145,6 @@ def _make_protein_network_stats(nodes: list[VizNode], edges: list[VizEdge]) -> N
         ),
         confirmedPpiEdgeCount=sum(1 for edge in edges if edge.isConfirmedPpi),
         coComplexOnlyEdgeCount=sum(1 for edge in edges if edge.isCoComplexOnly),
-        highEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "high"),
-        mediumEvidenceEdgeCount=sum(
-            1 for edge in edges if edge.evidenceLevel == "medium"
-        ),
-        lowEvidenceEdgeCount=sum(1 for edge in edges if edge.evidenceLevel == "low"),
-        unknownEvidenceEdgeCount=sum(
-            1 for edge in edges if edge.evidenceLevel == "unknown"
-        ),
     )
 
 
@@ -254,23 +226,14 @@ def _make_protein_neighbor_edge(
         is_co_complex_only=False,
     )
 
-    edge_raw = dict(row)
-    edge_raw.update(
-        {
-            "protein1": source_id,
-            "protein2": target_id,
-            "gene1": first_existing(row, ["gene1", "protein1_gene", "source_gene"]),
-            "gene2": first_existing(row, ["gene2", "protein2_gene", "target_gene"]),
-        }
-    )
-
     return VizEdge(
         id=f"DIRECT_PPI|{source_id}|{target_id}",
         source=source_id,
         target=target_id,
         type="ppi",
+        relationKind="protein_physical_interaction",
         label="PPI",
-        raw=edge_raw,
+        raw=dict(row),
         **evidence,
     )
 
