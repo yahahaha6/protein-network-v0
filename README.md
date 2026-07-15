@@ -1,157 +1,166 @@
-# Protein Network Explorer V1
+# Protein Network Explorer
 
-Protein Network Explorer is a local web application for exploring protein complexes, protein-protein interaction networks, and evidence-backed relationship data.
+Protein Network Explorer is a local, read-only web application for examining proteins, protein complexes, and evidence-backed interaction networks. It combines a FastAPI backend with a Next.js/Cytoscape.js frontend and keeps the research data outside Git.
 
-The project is built as a full-stack demo with a FastAPI backend and a Next.js frontend. It supports searching proteins and complexes, visualizing intra-complex and external interaction networks, and exploring global PPI neighborhoods around a selected protein.
+The current implementation is file-backed. It provides protein and complex search, detail pages, protein-centered PPI neighborhoods, intra-complex networks, complex external-partner networks, and a global PPI explorer.
 
-## Features
+## What You Can Explore
 
-### Protein and complex search
+- Search proteins by UniProt accession, gene label, or protein label.
+- Search complexes by complex ID or name.
+- Inspect protein details, HPA information, complex memberships, and related network links.
+- Compare confirmed direct PPI with co-complex-only relationships inside a complex.
+- Inspect proteins connected to a complex through external interactions.
+- Explore local or global protein-centered PPI neighborhoods.
+- Select nodes and edges without losing their scientific color or line-style encoding.
+- Export the visible network as PNG or canonical network JSON.
 
-- Search proteins by UniProt ID or protein/gene label
-- Search complexes by CORUM ID or complex name
-- Open detail pages for proteins and complexes
+## Scientific Network Contract
 
-### Protein pages
+All network pages consume the backend's canonical `NetworkResponse`. Core presentation does not reconstruct scientific fields from raw source records.
 
-- Protein detail view
-- Protein neighbor network view
-- Node detail panel
-- Edge evidence detail panel
+### Relationship semantics
 
-### Complex pages
+| Canonical relation | Meaning |
+|---|---|
+| `protein_physical_interaction` | Direct protein-protein interaction |
+| `complex_subunit_pair_supported` | Direct PPI confirmed between two subunits of the same complex |
+| `complex_subunit_pair_co_membership_only` | Shared complex membership without direct PPI evidence |
+| `complex_external_partner` | External protein associated with a complex through its subunits |
 
-- Complex detail view
-- Intra-complex network visualization
-- External interaction network visualization
-- Clickable node and edge inspection
+Protein-neighbor and global-PPI pages are two views of direct PPI; they are not additional relationship types.
 
-### Global PPI Explorer
+### Evidence and reported counts
 
-- Open `/global-ppi`
-- Enter a UniProt ID such as `Q15910`
-- Explore a protein-centered global PPI neighborhood
-- Show 20, 50, or all available local neighbors
-- Click edges to inspect relationship evidence
-- Click nodes to continue exploring another protein neighborhood
-- Download the current graph as PNG
-- Download the current graph data as raw JSON
+- DDI, DMI, structural/PDB, Gold, source, method, and publication evidence follow the canonical backend mapping.
+- Reported counts preserve three distinct states: `null` means the source did not report a count, `0` means the source explicitly reported zero, and a positive integer is the reported quantity.
+- A reported count and its detail records are independent. The application never derives a reported count from `details.length`.
+- `hasDDI` and `hasDMI` are true when either a positive reported count or non-empty canonical detail records provide support.
+- Malformed, negative, fractional, Boolean, or non-finite counts are rejected by the backend normalizer.
 
-## Tech Stack
+## Visual Semantics
+
+### Nodes
+
+| Node category | Color |
+|---|---|
+| TF | Green |
+| EF | Blue |
+| TF_and_EF | Orange |
+| Focus protein | Yellow |
+| Complex | Purple |
+
+The UI supports `TF_and_EF` as a canonical category. The current local source set does not contain a complete authoritative TF-and-EF mapping, so the application does not infer this category from gene names.
+
+### Edges
+
+Relationship, evidence, and context are combined rather than compressed into one edge type.
+
+- Direct PPI uses a blue solid line by default.
+- Confirmed intra-complex PPI uses a green solid line by default.
+- Co-complex-only relationships use orange dashed lines.
+- Complex external partners use blue solid lines by default.
+- DDI, DMI, combined DDI+DMI, and structural/PDB evidence override the default edge color and width in that priority order: structural, DDI+DMI, DDI, DMI, relation default.
+- An external partner that belongs to another complex keeps a dashed context line, including when structural evidence makes the line thicker.
+- Selection adds an outline or emphasis without changing node fill colors or edge colors and line styles.
+
+The legend is derived from the same presentation registry as the graph and only shows items applicable to the current network.
+
+## Technology
 
 ### Backend
 
-- Python
-- FastAPI
-- NetworkX
+- Python 3
+- FastAPI 0.128.8
+- Pydantic 2
 - Pandas
 - Uvicorn
 
 ### Frontend
 
-- Next.js
-- React
+- Next.js 16.2.10
+- React 19
 - TypeScript
-- Tailwind CSS
 - Cytoscape.js
+- Tailwind CSS
 
-## Project Structure
+## Repository Layout
 
 ```text
 protein-network-v0/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py
+│   │   ├── normalizers/     # source records -> canonical fields
+│   │   ├── routers/         # read-only API routes
+│   │   ├── schemas/         # canonical response models
 │   │   ├── config.py
 │   │   ├── datastore.py
-│   │   ├── transform.py
-│   │   ├── global_ppi_store.py
-│   │   └── routers/
-│   │       ├── health.py
-│   │       ├── search.py
-│   │       ├── protein.py
-│   │       ├── complex.py
-│   │       └── global_ppi.py
-│   └── scripts/
+│   │   └── main.py
+│   ├── scripts/
+│   └── tests/
 ├── frontend/
-│   ├── app/
-│   │   ├── page.tsx
-│   │   ├── protein/
-│   │   ├── complex/
-│   │   └── global-ppi/
-│   ├── components/
-│   │   ├── NetworkGraph.tsx
-│   │   └── DetailFields.tsx
-│   └── lib/
-│       └── api.ts
-├── data/
-│   └── local private data, ignored by Git
-└── docs/
+│   ├── app/                 # Next.js routes
+│   ├── components/          # graph and detail UI
+│   ├── lib/                 # API, semantics, presentation, view-models
+│   └── tests/
+├── docs/
+├── data/                    # local research data; ignored by Git
+└── README.md
 ```
 
-## Data Privacy
+## Prerequisites
 
-The real biological graph data is intentionally not included in this repository.
+- Python 3 with `venv` and `pip`.
+- Node.js 20.9 or newer and npm.
+- The required local graph files under `data/`, or an equivalent directory configured with `DATA_DIR`.
 
-The `data/` directory is ignored by Git because it may contain large or private research files, including GraphML, JSON, and TSV data files.
+## Local Data
 
-Before committing, always check:
+Real biological graph data is intentionally excluded from this repository. By default, when the backend is started from `backend/`, `DATA_DIR` resolves to `../data`.
+
+The loaders expect these dataset groups:
+
+```text
+data/
+├── complex_ext_ppi_graph/
+├── complex_intra_ppi_graph/
+├── global_ppi_graph/
+└── ppi_unit_graph/
+```
+
+To use a different location, create `backend/.env`:
+
+```dotenv
+DATA_DIR=/absolute/path/to/data
+```
+
+Do not copy real source rows into tests, fixtures, logs, snapshots, or exports committed to Git. Before every commit, verify:
 
 ```bash
 git ls-files data
 ```
 
-This command should return no output.
+The command must return no output.
 
-## Local Data Layout
+## Run Locally
 
-The backend expects local data files under `data/`.
+### 1. Start the backend
 
-Current local layout:
-
-```text
-data/
-├── complex_ext_ppi_graph/
-│   ├── complex_ext_ppi_graph.graphml
-│   ├── complex_ext_ppi_graph.json
-│   ├── complex_nodes.tsv
-│   ├── ext_edges.tsv
-│   └── ext_protein_nodes.tsv
-├── complex_intra_ppi_graph/
-│   ├── complex_intra_ppi_graph.graphml
-│   ├── complex_intra_ppi_graph.json
-│   ├── complex_nodes.tsv
-│   ├── intra_edges.tsv
-│   └── protein_nodes.tsv
-├── global_ppi_graph/
-│   ├── ppi_graph.graphml
-│   └── ppi_graph.json
-└── ppi_unit_graph/
-    ├── ppi_edges.tsv
-    └── ppi_nodes.tsv
-```
-
-## Run Backend
+From the repository root:
 
 ```bash
 cd backend
+python3 -m venv .venv
 source .venv/bin/activate
-uvicorn app.main:app --reload --port 8000
+python -m pip install -r requirements.txt
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Backend URL:
+The API is available at `http://localhost:8000`; interactive API documentation is at `http://localhost:8000/docs`.
 
-```text
-http://localhost:8000
-```
+### 2. Start the frontend
 
-API docs:
-
-```text
-http://localhost:8000/docs
-```
-
-## Run Frontend
+In another terminal, from the repository root:
 
 ```bash
 cd frontend
@@ -159,123 +168,81 @@ npm install
 npm run dev
 ```
 
-Frontend URL:
+Open `http://localhost:3000`.
 
-```text
-http://localhost:3000
+The frontend uses `http://localhost:8000` by default. To override it, create `frontend/.env.local`:
+
+```dotenv
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
 ## Main Pages
 
-```text
-/
-```
+| Page | Example route |
+|---|---|
+| Home and search | `/` |
+| Protein detail | `/protein/Q15910` |
+| Protein neighbor network | `/protein/Q15910/network` |
+| Complex detail | `/complex/996` |
+| Intra-complex network | `/complex/996/intra` |
+| Complex external network | `/complex/996/ext` |
+| Global PPI entry | `/global-ppi` |
+| Global PPI neighborhood | `/global-ppi/protein/Q15910/network` |
 
-Home page with search and module entry points.
+Protein detail links identify each related complex separately, so a user can open the corresponding intra-complex or external network without guessing which complex an action targets.
 
-```text
-/protein/Q15910
-```
-
-Protein detail page.
-
-```text
-/protein/Q15910/network
-```
-
-Protein neighbor network page.
-
-```text
-/complex/996
-```
-
-Complex detail page.
-
-```text
-/complex/996/intra
-```
-
-Intra-complex network page.
-
-```text
-/complex/996/ext
-```
-
-External complex-protein interaction network page.
-
-```text
-/global-ppi
-```
-
-Global PPI Explorer entry page.
-
-```text
-/global-ppi/protein/Q15910/network
-```
-
-Protein-centered global PPI neighborhood page.
+A protein can exist in the detail and complex datasets without having a high-confidence direct PPI entry in `ppi_unit_graph`. The protein-network page treats this as an expected no-network state and explains that no qualifying direct PPI evidence is available.
 
 ## Backend API
 
-### Health
+All application routes are prefixed with `/api`.
 
-```text
-GET /api/health
+| Area | Endpoint |
+|---|---|
+| Health | `GET /api/health` |
+| Search | `GET /api/search?q={keyword}&type={protein\|complex\|all}` |
+| Protein detail | `GET /api/protein/{uniprot_ac}` |
+| Protein neighbors | `GET /api/protein/{uniprot_ac}/neighbors` |
+| Complex detail | `GET /api/complex/{complex_id}` |
+| Complex intra network | `GET /api/complex/{complex_id}/intra` |
+| Complex external network | `GET /api/complex/{complex_id}/ext` |
+| Global PPI metadata | `GET /api/global-ppi/info` |
+| Global protein detail | `GET /api/global-ppi/protein/{uniprot_ac}` |
+| Global PPI neighbors | `GET /api/global-ppi/protein/{uniprot_ac}/neighbors` |
+| Global PPI edge | `GET /api/global-ppi/edge?source={source}&target={target}` |
+
+Network routes support bounded pagination or limits where applicable and canonical filters such as source, protein category, DDI, DMI, PDB/structural evidence, confirmed PPI, co-complex-only, and other-complex membership.
+
+## Validation
+
+Run the complete backend suite from the repository root:
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python -m unittest discover \
+  -s backend/tests \
+  -p 'test_*.py' \
+  -v
 ```
 
-### Search
+Run frontend semantic tests, lint, and the production build:
 
-```text
-GET /api/search?q={keyword}&type={protein|complex|all}
+```bash
+cd frontend
+npm run test:network-semantics
+npm run lint
+npm run build
 ```
 
-### Protein
+Before committing any change, also run:
 
-```text
-GET /api/protein/{uniprot_ac}
-GET /api/protein/{uniprot_ac}/neighbors
+```bash
+git diff --check
+git ls-files data
 ```
 
-### Complex
+## Current Boundaries
 
-```text
-GET /api/complex/{complex_id}
-GET /api/complex/{complex_id}/intra
-GET /api/complex/{complex_id}/ext
-```
-
-### Global PPI
-
-```text
-GET /api/global-ppi/info
-GET /api/global-ppi/protein/{uniprot_ac}
-GET /api/global-ppi/protein/{uniprot_ac}/neighbors?limit=20
-GET /api/global-ppi/edge?source={source}&target={target}
-```
-
-## V1 Status
-
-V1 includes:
-
-- Full-stack FastAPI + Next.js workflow
-- Protein and complex detail pages
-- Cytoscape.js network visualization
-- Node detail inspection
-- Edge evidence inspection
-- Global PPI neighborhood exploration
-- PNG graph export
-- Network JSON graph export for the canonical current backend response page
-- Local-only private data workflow
-
-## Future Work
-
-Potential V1.1 / V2 improvements:
-
-- Search global PPI by gene symbol, not only UniProt ID
-- Add PubMed links for publication fields
-- Add source database badges
-- Add edge filtering by source database or evidence type
-- Add shortest path search between proteins
-- Add second-hop neighborhood expansion
-- Add Neo4j-backed graph queries
-- Add deployment configuration
+- The application is read-only and file-backed.
+- Real research data is local and is not distributed with the repository.
+- Network presentation depends only on canonical fields supplied by the backend; missing scientific evidence is not fabricated in the frontend.
+- `TF_and_EF` is supported by the contract and UI, but runtime classification remains limited until an authoritative source mapping is supplied.
